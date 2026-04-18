@@ -1,0 +1,84 @@
+<div class="shop-container">
+  <aside class="shop-sidebar">
+    <div class="filter-group">
+      <h3>Categorias</h3>
+      @for (cat of categorias(); track cat.id ?? cat.nombre) {
+        <label class="custom-checkbox">
+          <input
+            type="checkbox"
+            [checked]="categoriasSeleccionadas().includes(+cat.id)"
+            (change)="toggleCategoria(+cat.id, $any($event.target).checked)"
+          >
+          <span>{{ cat.nombre }}</span>
+        </label>
+      }
+    </div>
+
+    <div class="filter-group">
+      <h3>Genero</h3>
+      <select class="custom-select" [value]="generoSeleccionado()" (change)="cambiarGenero($event)">
+        <option value="Cualquiera">Unisex</option>
+        <option value="Hombre">Caballeros</option>
+        <option value="Mujer">Damas</option>
+        
+      </select>
+    </div>
+  </aside>
+
+  <main class="shop-content">
+    <div class="shop-header">
+      <div>
+        <h2>Catalogo Completo</h2>
+        <p>Mostrando {{ productosFiltrados().length }} productos</p>
+      </div>
+      <div class="shop-search">
+        <input
+          type="text"
+          placeholder="Buscar por nombre, categoria, genero o talla"
+          [value]="textoBusqueda()"
+          (input)="actualizarBusqueda($event)"
+        >
+      </div>
+    </div>
+
+    <div class="products-grid">
+      @for (prod of productosFiltrados(); track prod.id) {
+        <article class="product-card">
+          <div class="img-wrapper">
+            <span class="gender-badge" 
+                  [ngClass]="{
+                    'gender-hombre': mostrarGenero(prod) === 'Hombre',
+                    'gender-mujer': mostrarGenero(prod) === 'Mujer',
+                    'gender-unisex': mostrarGenero(prod) !== 'Hombre' && mostrarGenero(prod) !== 'Mujer'
+                  }">
+              {{ mostrarGenero(prod) }}
+            </span>
+            <img [src]="resolverImagen(prod.imagen)" [alt]="prod.nombre">
+            <button
+              class="add-btn"
+              type="button"
+              (click)="consultarPorWhatsApp(prod)"
+            >
+              Consultar por WhatsApp
+            </button>
+          </div>
+          <div class="product-info">
+            <span class="category">{{ prod.categoria_nombre }}</span>
+            <h3>{{ prod.nombre }}</h3>
+            <div class="sizes-row" aria-label="Tallas disponibles">
+              @for (talla of obtenerTallas(prod); track talla) {
+                <span class="size-chip">{{ talla }}</span>
+              } @empty {
+                <span class="sizes-empty"></span>
+              }
+            </div>
+            <p class="price">{{ formatearPrecio(prod.precio) }}</p>
+          </div>
+        </article>
+      } @empty {
+        <p class="empty-grid-message">No hay productos para los filtros seleccionados.</p>
+      }
+    </div>
+  </main>
+</div>
+

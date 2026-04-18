@@ -1,0 +1,89 @@
+<div class="client-shell">
+  <header class="client-header">
+    <a class="client-logo" routerLink="/">La Casa del Jean</a>
+    <nav class="client-nav">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
+      <a routerLink="/shop" routerLinkActive="active">Catalogo</a>
+
+      <button class="login-btn" type="button" (click)="abrirLoginModal()">INICIAR SESION</button>
+
+      <a
+        class="wa-header-btn"
+        [href]="obtenerEnlaceWhatsAppHeader()"
+        [class.is-disabled]="!tieneWhatsAppConfig()"
+        [attr.aria-disabled]="!tieneWhatsAppConfig()"
+        [attr.tabindex]="!tieneWhatsAppConfig() ? -1 : 0"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Consultar WhatsApp
+      </a>
+    </nav>
+  </header>
+
+  <main class="client-main">
+    <router-outlet></router-outlet>
+  </main>
+
+  <footer class="client-footer">
+    <div class="footer-brand">
+      <h3>La Casa del Jean</h3>
+      <p>Elevando tu estilo con denim premium y disenos atemporales. Calidad superior que perdura.</p>
+    </div>
+    <div class="footer-links">
+      <h4>Navegacion</h4>
+      <ul>
+        <li><a routerLink="/">Inicio</a></li>
+        <li><a routerLink="/shop">Catalogo</a></li>
+      </ul>
+    </div>
+    <div class="footer-links">
+      <h4>Servicio</h4>
+      <ul>
+        <li><a href="#">Ayuda y Contacto</a></li>
+        <li><a href="#">Politicas de Envio</a></li>
+      </ul>
+    </div>
+  </footer>
+</div>
+
+@if (mostrarLoginModal()) {
+  <div class="login-modal-overlay" (click)="cerrarLoginModal()">
+    <div class="login-modal" (click)="$event.stopPropagation()">
+      <button class="modal-close" type="button" (click)="cerrarLoginModal()">x</button>
+      <h3>Bienvenido</h3>
+      <p>Ingresa para continuar al panel administrativo.</p>
+
+      <div class="login-field">
+        <label for="login-email">Correo Electronico</label>
+        <input
+          id="login-email"
+          type="email"
+          placeholder="correo@ejemplo.com"
+          [value]="loginEmail"
+          (input)="loginEmail = $any($event.target).value"
+        >
+      </div>
+
+      <div class="login-field">
+        <label for="login-password">Contrasena</label>
+        <input
+          id="login-password"
+          type="password"
+          placeholder="********"
+          [value]="loginPassword"
+          (input)="loginPassword = $any($event.target).value"
+          (keydown.enter)="ingresar()"
+        >
+      </div>
+
+      @if (loginError()) {
+        <p class="login-error">{{ loginError() }}</p>
+      }
+
+      <button class="login-submit-btn" type="button" [disabled]="loginCargando()" (click)="ingresar()">
+        {{ loginCargando() ? 'Validando...' : 'Entrar' }}
+      </button>
+    </div>
+  </div>
+}

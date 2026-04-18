@@ -1,0 +1,63 @@
+<section class="home-hero">
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <span class="hero-subtitle">NUEVA COLECCION</span>
+    <h1>Estilo que define tu esencia</h1>
+    <p>Descubre el equilibrio perfecto entre comodidad premium y diseno vanguardista. Jeans creados para destacar.</p>
+    <button type="button" class="hero-btn" routerLink="/shop">Explorar Catalogo</button>
+  </div>
+</section>
+
+<section class="home-catalog-shell">
+  <div class="home-catalog-container">
+    <div class="section-head">
+      <h2>Productos Destacados</h2>
+      <a routerLink="/shop" class="view-all">Ver todos ></a>
+    </div>
+
+    <div class="products-grid">
+      @for (prod of productosDestacados(); track prod.id) {
+        <article class="product-card">
+          <div class="img-wrapper">
+            <span
+              class="gender-badge"
+              [ngClass]="{
+                'gender-hombre': mostrarGenero(prod) === 'Hombre',
+                'gender-mujer': mostrarGenero(prod) === 'Mujer',
+                'gender-unisex': mostrarGenero(prod) !== 'Hombre' && mostrarGenero(prod) !== 'Mujer'
+              }"
+            >
+              {{ mostrarGenero(prod) }}
+            </span>
+            <img [src]="resolverImagen(prod.imagen)" [alt]="prod.nombre">
+            <button
+              class="add-btn"
+              type="button"
+              [disabled]="!tieneWhatsAppConfig()"
+              [style.opacity]="!tieneWhatsAppConfig() ? '0.6' : ''"
+              [style.cursor]="!tieneWhatsAppConfig() ? 'not-allowed' : 'pointer'"
+              (click)="consultarPorWhatsApp(prod)"
+            >
+              Consultar por WhatsApp
+            </button>
+          </div>
+          <div class="product-info">
+            <span class="category">{{ prod.categoria_nombre }}</span>
+            <h3>{{ prod.nombre }}</h3>
+            <div class="sizes-row" aria-label="Tallas disponibles">
+              @for (talla of obtenerTallas(prod); track talla) {
+                <span class="size-chip">{{ talla }}</span>
+              } @empty {
+                <span class="sizes-empty"></span>
+              }
+            </div>
+            <p class="price">{{ formatearPrecio(prod.precio) }}</p>
+          </div>
+        </article>
+      } @empty {
+        <p class="empty-grid-message">No hay productos destacados por el momento.</p>
+      }
+    </div>
+  </div>
+</section>
+
