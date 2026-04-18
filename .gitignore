@@ -1,0 +1,34 @@
+# =====================
+# NODE & ANGULAR
+# =====================
+node_modules/
+dist/
+.angular/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+pnpm-debug.log
+coverage/
+
+# =====================
+# PHP & BACKEND
+# =====================
+vendor/
+*.log
+.env
+*.sqlite
+php_errors.log
+
+# =====================
+# IDEs & OS
+# =====================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+Desktop.ini
