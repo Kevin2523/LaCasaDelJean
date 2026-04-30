@@ -12,7 +12,7 @@ import { HttpClient } from '@angular/common/http';
 })
 export class HomeComponent implements OnInit {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:8000/';
+  private readonly baseUrl = 'http://localhost/LaCasaDelJean/backend/';
 
   productosDestacados = signal<any[]>([]);
   configTienda = signal<{ wa_principal: string; wa_plantilla: string }>({
@@ -29,7 +29,7 @@ export class HomeComponent implements OnInit {
       error: (err) => console.error('Error obteniendo destacados:', err)
     });
 
-    this.http.get<any>(`${this.baseUrl}configuracion.php`).subscribe({
+    this.http.get<any>(`${this.baseUrl}config_cliente.php`).subscribe({
       next: (data) => {
         const config = this.extraerConfigWhatsApp(data);
         this.configTienda.set({
@@ -176,3 +176,6 @@ export class HomeComponent implements OnInit {
     );
   }
 }
+
+
+

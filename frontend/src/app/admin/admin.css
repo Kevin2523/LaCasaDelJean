@@ -577,6 +577,10 @@ input:checked+.slider:before {
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .lcdj-modal-premium .panel-header h3 {
@@ -589,6 +593,9 @@ input:checked+.slider:before {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 6px;
 }
 
 .lcdj-modal-premium .form-group label {
@@ -634,23 +641,23 @@ input:checked+.slider:before {
 
 .lcdj-modal-premium .tallas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 10px;
-  max-height: 220px;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
+  max-height: 140px;
   overflow-y: auto;
-  padding: 4px;
+  padding: 6px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
 }
 
 .lcdj-modal-premium .talla-toggle-btn {
-  height: 38px;
+  height: 32px;
   border: 1px solid var(--denim-blue);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--white);
   color: var(--denim-blue);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -696,6 +703,12 @@ input:checked+.slider:before {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  position: sticky;
+  bottom: 0;
+  background: #ffffff;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 8px;
 }
 
 .lcdj-modal-premium .btn-save-premium {
@@ -705,6 +718,30 @@ input:checked+.slider:before {
 
 .lcdj-modal-premium .btn-save-premium:hover {
   box-shadow: 0 12px 24px rgba(180, 83, 9, 0.48);
+}
+
+.modal-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #ffffff;
+}
+
+.modal-close-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
 }
 
 @media (max-width: 768px) {

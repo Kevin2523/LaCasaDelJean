@@ -7,7 +7,7 @@ import { Observable } from 'rxjs';
 })
 export class ApiService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:8000/';
+  private readonly baseUrl = 'http://localhost/LaCasaDelJean/backend/';
 
   getDashboard(): Observable<any> {
     return this.http.get<any>(`${this.baseUrl}dashboard.php`);
@@ -69,3 +69,6 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}ventas.php`, payload);
   }
 }
+
+
+

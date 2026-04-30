@@ -12,7 +12,7 @@ import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/rou
 export class ClientLayoutComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:8000/';
+  private readonly baseUrl = 'http://localhost/LaCasaDelJean/backend/';
 
   mostrarLoginModal = signal(false);
   loginCargando = signal(false);
@@ -99,7 +99,7 @@ export class ClientLayoutComponent implements OnInit {
   }
 
   private cargarConfigTienda() {
-    this.http.get<any>(`${this.baseUrl}configuracion.php`).subscribe({
+    this.http.get<any>(`${this.baseUrl}config_cliente.php`).subscribe({
       next: (data) => {
         const config = this.extraerConfigWhatsApp(data);
         this.configTienda.set({
@@ -148,7 +148,7 @@ export class ClientLayoutComponent implements OnInit {
   }
 
   private guardarSesionUsuario(respuesta: any): void {
-    if (typeof localStorage === 'undefined') {
+    if (typeof sessionStorage === 'undefined') {
       return;
     }
 
@@ -157,10 +157,15 @@ export class ClientLayoutComponent implements OnInit {
       respuesta?.user?.nombre ??
       respuesta?.usuario_nombre ??
       respuesta?.nombre ??
-      'Administrador'
+      'Invitado'
     ).toString().trim();
 
-    localStorage.setItem('is_logged', 'true');
-    localStorage.setItem('user_name', nombre || 'Administrador');
+    const nombreSeguro = nombre || 'Invitado';
+    sessionStorage.setItem('is_logged', 'true');
+    sessionStorage.setItem('user_name', nombreSeguro);
+    sessionStorage.setItem('user', JSON.stringify({ nombre: nombreSeguro }));
   }
 }
+
+
+

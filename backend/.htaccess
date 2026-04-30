@@ -1,0 +1,55 @@
+# ============================================================
+# .htaccess - LaCasaDelJean Backend (Apache/XAMPP)
+# ============================================================
+
+# Bloquear acceso directo a archivos sensibles
+<Files "db.php">
+    Require all denied
+</Files>
+
+<FilesMatch "\.(env|log|sql|bak|old|orig|tmp|config\.php)$">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Deshabilitar listado de directorios
+Options -Indexes
+
+# Cabeceras de seguridad HTTP
+<IfModule mod_headers.c>
+    # CORS para desarrollo local (Angular en :4200). Se aplica incluso en preflight OPTIONS.
+    SetEnvIf Origin "^http://localhost:4200$" CORS_ALLOW_ORIGIN=$0
+    SetEnvIf Origin "^http://127\.0\.0\.1:4200$" CORS_ALLOW_ORIGIN=$0
+    Header always set Access-Control-Allow-Origin "%{CORS_ALLOW_ORIGIN}e" env=CORS_ALLOW_ORIGIN
+    Header always set Access-Control-Allow-Credentials "true" env=CORS_ALLOW_ORIGIN
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+    Header always set Vary "Origin"
+
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Content-Security-Policy "default-src 'self'"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header unset X-Powered-By
+</IfModule>
+
+# Limitar metodos HTTP permitidos
+<LimitExcept GET POST PUT DELETE OPTIONS>
+    Require all denied
+</LimitExcept>
+
+# Proteccion basica contra inyecciones obvias en query string
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{QUERY_STRING} (union|select|insert|delete|drop|create|alter|exec) [NC]
+    RewriteRule .* - [F,L]
+
+    RewriteCond %{QUERY_STRING} (<script|javascript:|vbscript:) [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+

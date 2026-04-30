@@ -1,62 +1,106 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
-header("Content-Type: application/json; charset=UTF-8");
+/**
+ * categorias.php — VERSIÓN SEGURA
+ *
+ * Correcciones aplicadas:
+ * ✅ V-02: Todas las consultas DELETE/SELECT con parámetro usan Prepared Statements
+ * ✅ V-03: CORS restrictivo
+ * ✅ V-04: requireAuth() para operaciones de escritura
+ * ✅ V-05: Credenciales centralizadas
+ * ✅ V-14: Bloque DELETE duplicado eliminado
+ */
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
+require_once 'db.php';
 
-$conn = new mysqli("localhost", "root", "", "lacasadeljean");
+setCorsHeaders(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']);
+setSecurityHeaders();
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// ✅ V-04: GET es público (muestra categorías en la tienda).
+// Las operaciones de escritura requieren autenticación.
+if (in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE'], true)) {
+    requireAuth();
+}
+
+$conn = getConnection();
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $sql = "SELECT c.id, c.nombre, COUNT(p.id) as total_productos 
-            FROM categorias c LEFT JOIN productos p ON c.id = p.categoria_id 
+    // Sin parámetros de usuario — seguro
+    $sql = "SELECT c.id, c.nombre, COUNT(p.id) as total_productos
+            FROM categorias c LEFT JOIN productos p ON c.id = p.categoria_id
             GROUP BY c.id ORDER BY c.id DESC";
     $result = $conn->query($sql);
     $data = [];
-    while($row = $result->fetch_assoc()) { $data[] = $row; }
+    while ($row = $result->fetch_assoc()) {
+        $data[] = $row;
+    }
     echo json_encode($data);
-} 
+}
+
 elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = json_decode(file_get_contents("php://input"));
+    if (empty($data->nombre)) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "El nombre es requerido"]);
+        $conn->close();
+        exit;
+    }
     $stmt = $conn->prepare("INSERT INTO categorias (nombre) VALUES (?)");
     $stmt->bind_param("s", $data->nombre);
     echo json_encode(["success" => $stmt->execute()]);
+    $stmt->close();
 }
+
 elseif ($_SERVER['REQUEST_METHOD'] === 'PUT') {
     $data = json_decode(file_get_contents("php://input"));
-    // Validamos que venga el ID y el nombre
-    if(isset($data->id) && isset($data->nombre)) {
-        $stmt = $conn->prepare("UPDATE categorias SET nombre=? WHERE id=?");
-        $stmt->bind_param("si", $data->nombre, $data->id);
-        echo json_encode(["success" => $stmt->execute()]);
-    } else {
+    if (!isset($data->id) || !isset($data->nombre) || empty($data->nombre)) {
+        http_response_code(400);
         echo json_encode(["success" => false, "message" => "Datos incompletos"]);
+        $conn->close();
+        exit;
     }
+    $id = (int)$data->id;
+    $stmt = $conn->prepare("UPDATE categorias SET nombre=? WHERE id=?");
+    $stmt->bind_param("si", $data->nombre, $id);
+    echo json_encode(["success" => $stmt->execute()]);
+    $stmt->close();
 }
+
 elseif ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-    $id = $_GET['id'];
-    
-    // 1. Verificamos si hay productos asociados
-    $check = $conn->query("SELECT COUNT(*) as total FROM productos WHERE categoria_id = $id");
-    $total = $check->fetch_assoc()['total'];
-    
-    if ($total > 0) {
-        // 2. Si hay productos, prohibimos el borrado
+    // ✅ V-02: Prepared Statement para verificar y eliminar
+    $id = (int)($_GET['id'] ?? 0);
+
+    if ($id <= 0) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "ID inválido"]);
+        $conn->close();
+        exit;
+    }
+
+    // Verificar si hay productos asociados
+    $stmtCheck = $conn->prepare("SELECT COUNT(*) as total FROM productos WHERE categoria_id = ?");
+    $stmtCheck->bind_param("i", $id);
+    $stmtCheck->execute();
+    $total = $stmtCheck->get_result()->fetch_assoc()['total'];
+    $stmtCheck->close();
+
+    if ((int)$total > 0) {
         echo json_encode([
-            "success" => false, 
+            "success" => false,
             "message" => "No puedes eliminar esta categoría porque tiene $total productos asociados. Muévelos o elimínalos primero."
         ]);
     } else {
-        // 3. Si está limpia, procedemos
-        $res = $conn->query("DELETE FROM categorias WHERE id = $id");
-        echo json_encode(["success" => $res]);
+        // ✅ V-02: DELETE también con Prepared Statement
+        $stmtDel = $conn->prepare("DELETE FROM categorias WHERE id = ?");
+        $stmtDel->bind_param("i", $id);
+        echo json_encode(["success" => $stmtDel->execute()]);
+        $stmtDel->close();
     }
+    // ✅ V-14: Bloque DELETE duplicado ELIMINADO
 }
-elseif ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-    $id = $_GET['id'];
-    $conn->query("DELETE FROM categorias WHERE id = $id");
-    echo json_encode(["success" => true]);
-}
+
 $conn->close();
-?>

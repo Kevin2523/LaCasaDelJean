@@ -1,16 +1,14 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
-header("Content-Type: application/json; charset=UTF-8");
+require_once 'db.php';
+setCorsHeaders(['GET', 'OPTIONS']);
+setSecurityHeaders();
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { 
     http_response_code(200); 
     exit; 
 }
 
-$conn = new mysqli("localhost", "root", "", "lacasadeljean");
-$conn->set_charset("utf8");
+$conn = getConnection();
 
 if ($conn->connect_error) {
     echo json_encode(["error" => "Error de conexión"]);

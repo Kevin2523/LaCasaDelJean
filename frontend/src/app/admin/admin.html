@@ -14,7 +14,7 @@
   <div class="sidebar-footer"><button class="btn-logout" type="button" (click)="cerrarSesion()">&#128682; Cerrar Sesión</button></div>
 </aside>
 
-<main class="main-wrapper" [class.expanded]="!sidebarAbierta()">
+<main class="main-wrhapper" [class.expanded]="!sidebarAbierta()">
   <header class="top-header">
     <button type="button" class="btn-menu" (click)="toggleSidebar()">&#9776;</button>
     @if (currentView() !== 'configuracion') {
@@ -22,7 +22,7 @@
         <input type="text" placeholder="Buscar productos, SKUs..." (input)="actualizarBusqueda($event)">
       </div>
     }
-    <div class="user-profile"><span>Hola, {{ usuarioLogueado().nombre }}</span><div class="avatar">K</div></div>
+    <div class="user-profile"><span>Hola, {{ userName() }}</span><div class="avatar">{{ userInitial() }}</div></div>
   </header>
 
   <div class="content-body">
@@ -283,8 +283,9 @@
 @if (mostrarModal()) {
   <div class="modal-overlay">
     <section class="modal-content panel-section lcdj-modal-premium">
-      <div class="panel-header">
+      <div class="panel-header modal-header-sticky">
         <h3>{{ productoActual().id ? 'Editar Producto' : 'Nuevo Producto' }}</h3>
+        <button type="button" class="modal-close-btn" aria-label="Cerrar modal" (click)="cerrarModal()">✕</button>
       </div>
 
       <form class="admin-form" (ngSubmit)="guardarProducto()">

@@ -1,0 +1,9 @@
+{
+  "name": "lacasadeljean-workspace",
+  "private": true,
+  "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -Command \"$p = Start-Process -FilePath 'C:\\xampp\\php\\php.exe' -ArgumentList '-S','localhost:8000','-t','C:\\Users\\kjmg2\\Documents\\LaCasaDelJean' -WindowStyle Hidden -PassThru; Write-Host ('PHP backend PID: ' + $p.Id); Set-Location frontend; npm run start\"",
+    "start:frontend": "npm --prefix frontend run start",
+    "start:backend": "powershell -ExecutionPolicy Bypass -File scripts/start-backend.ps1"
+  }
+}

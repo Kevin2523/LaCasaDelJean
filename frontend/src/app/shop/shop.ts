@@ -11,7 +11,7 @@ import { HttpClient } from '@angular/common/http';
 })
 export class ShopComponent implements OnInit {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:8000/';
+  private readonly baseUrl = 'http://localhost/LaCasaDelJean/backend/';
 
   productosTienda = signal<any[]>([]);
   categorias = signal<any[]>([]);
@@ -79,7 +79,7 @@ export class ShopComponent implements OnInit {
   }
 
   cargarConfigTienda() {
-    this.http.get<any>(`${this.baseUrl}configuracion.php`).subscribe({
+    this.http.get<any>(`${this.baseUrl}config_cliente.php`).subscribe({
       next: (data) => {
         const config = this.extraerConfigWhatsApp(data);
         this.configTienda.set({
@@ -235,3 +235,6 @@ export class ShopComponent implements OnInit {
     );
   }
 }
+
+
+

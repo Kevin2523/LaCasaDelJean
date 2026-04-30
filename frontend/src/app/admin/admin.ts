@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from './api.service';
+import { AuthService } from '../auth.service'; // ✅ V-07/V-04: Centralizar auth
 import Swal from 'sweetalert2';
 
 @Component({
@@ -17,6 +18,7 @@ export class AdminComponent implements OnInit {
 
   private readonly apiService = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly authService = inject(AuthService); // ✅ V-07
 
   dashboardData = signal<any>(null);
   productosData = signal<any[]>([]);
@@ -24,6 +26,8 @@ export class AdminComponent implements OnInit {
   reporteContable = signal<any[]>([]);
   configData = signal<any>(null);
   usuarioLogueado = signal<any>({ nombre: 'Administrador', id: 1 });
+  userName = signal('Invitado');
+  userInitial = computed(() => (this.userName().trim().charAt(0) || 'I').toUpperCase());
   configWhatsApp = signal<any>({ wa_principal: '', wa_secundario: '', wa_plantilla: '' });
   sidebarAbierta = signal(true);
   tallasParaInventario = signal<{ talla: string; stock: number }[]>([]);
@@ -52,7 +56,7 @@ export class AdminComponent implements OnInit {
     const filtro = this.filtroCategoria();
     const busqueda = this.textoBusqueda().toLowerCase().trim();
     const productos = this.productosData();
-    return productos.filter((producto) => {
+    return productos.filter((producto: any) => {
       const coincideCategoria = filtro === 'Todas' || producto.categoria_nombre === filtro;
       const coincideBusqueda = (producto?.nombre ?? '').toLowerCase().includes(busqueda);
       return coincideCategoria && coincideBusqueda;
@@ -63,7 +67,7 @@ export class AdminComponent implements OnInit {
     const busqueda = this.textoBusqueda().toLowerCase().trim();
     const categorias = this.categoriasData();
     if (!busqueda) return categorias;
-    return categorias.filter((categoria) => (categoria?.nombre ?? '').toLowerCase().includes(busqueda));
+    return categorias.filter((categoria: any) => (categoria?.nombre ?? '').toLowerCase().includes(busqueda));
   });
 
   reporteContableResumen = computed(() => {
@@ -114,15 +118,15 @@ export class AdminComponent implements OnInit {
 
   cargarDashboard() {
     this.apiService.getDashboard().subscribe({
-      next: (data) => this.dashboardData.set(data),
-      error: (error) => console.error('Error al cargar dashboard:', error)
+      next: (data: any) => this.dashboardData.set(data),
+      error: (error: any) => console.error('Error al cargar dashboard:', error)
     });
   }
 
   obtenerProductos() {
     this.apiService.getProductos().subscribe({
-      next: (data) => this.productosData.set(data ?? []),
-      error: (error) => console.error('Error al cargar productos:', error)
+      next: (data: any) => this.productosData.set(data ?? []),
+      error: (error: any) => console.error('Error al cargar productos:', error)
     });
   }
 
@@ -133,23 +137,25 @@ export class AdminComponent implements OnInit {
 
   obtenerCategorias() {
     this.apiService.getCategorias().subscribe({
-      next: (data) => this.categoriasData.set(data),
-      error: (error) => console.error('Error al cargar categorías:', error)
+      next: (data: any) => this.categoriasData.set(data),
+      error: (error: any) => console.error('Error al cargar categorías:', error)
     });
   }
 
   cargarConfiguracion() {
     this.apiService.getConfiguracion().subscribe({
-      next: (data) => {
+      next: (data: any) => {
         this.configData.set(data);
 
         const usuarioData = data?.usuario ?? {};
         const nombreUsuario = (usuarioData?.nombre ?? '').toString().trim();
-        const nombreSesion = typeof localStorage !== 'undefined' ? localStorage.getItem('user_name') ?? '' : '';
+        // ✅ V-07: sessionStorage en lugar de localStorage
+        const nombreSesion = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('user_name') ?? '' : '';
         this.usuarioLogueado.set({
           id: Number(usuarioData?.id ?? data?.usuario_id ?? this.usuarioLogueado().id ?? 1),
-          nombre: nombreSesion.trim() || nombreUsuario || 'Administrador'
+          nombre: nombreSesion.trim() || nombreUsuario || 'Invitado'
         });
+        this.userName.set((nombreSesion.trim() || nombreUsuario || 'Invitado').trim());
 
         const whatsappData = data?.whatsapp ?? data?.config_whatsapp ?? data ?? {};
         this.configWhatsApp.set({
@@ -158,7 +164,7 @@ export class AdminComponent implements OnInit {
           wa_plantilla: (whatsappData?.wa_plantilla ?? whatsappData?.mensaje_whatsapp ?? '').toString()
         });
       },
-      error: (error) => console.error('Error al cargar configuración:', error)
+      error: (error: any) => console.error('Error al cargar configuración:', error)
     });
   }
 
@@ -235,8 +241,8 @@ export class AdminComponent implements OnInit {
 
   cargarContabilidad() {
     this.apiService.getContabilidad().subscribe({
-      next: (data) => this.reporteContable.set(data ?? []),
-      error: (error) => console.error('Error al cargar contabilidad:', error)
+      next: (data: any) => this.reporteContable.set(data ?? []),
+      error: (error: any) => console.error('Error al cargar contabilidad:', error)
     });
   }
 
@@ -313,7 +319,7 @@ export class AdminComponent implements OnInit {
     const producto = this.productoActual();
     const genero = (producto?.genero ?? '').toString().toLowerCase();
     const categoriaId = Number(producto?.categoria_id ?? 0);
-    const categoria = this.categoriasData().find((cat) => Number(cat.id) === categoriaId);
+    const categoria = this.categoriasData().find((cat: any) => Number(cat.id) === categoriaId);
     const nombreCategoria = this.normalizarTexto((categoria?.nombre ?? '').toString());
 
     if (this.esCategoriaSinTallas(nombreCategoria)) {
@@ -485,10 +491,8 @@ export class AdminComponent implements OnInit {
   }
 
   cerrarSesion(): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.clear();
-    }
-    this.router.navigate(['/']);
+    // ✅ V-04 + V-07: AuthService destruye la sesión en el SERVIDOR y limpia sessionStorage
+    this.authService.logout();
   }
 
   private sincronizarTallasConReglas(): void {
@@ -531,16 +535,39 @@ export class AdminComponent implements OnInit {
   }
 
   private cargarUsuarioDesdeSesion(): void {
-    if (typeof localStorage === 'undefined') {
-      return;
-    }
+    const usuarioSesion = this.obtenerUsuarioSesion();
+    const nombre = (usuarioSesion?.nombre ?? this.authService.getUserName() ?? '').toString().trim();
+    this.userName.set(nombre || 'Invitado');
 
-    const nombre = (localStorage.getItem('user_name') ?? '').trim();
     if (nombre) {
       this.usuarioLogueado.set({
         ...this.usuarioLogueado(),
         nombre
       });
+      return;
+    }
+
+    this.usuarioLogueado.set({
+      ...this.usuarioLogueado(),
+      nombre: 'Invitado'
+    });
+  }
+
+  private obtenerUsuarioSesion(): { nombre?: string } | null {
+    if (typeof sessionStorage === 'undefined') {
+      return null;
+    }
+
+    const raw = sessionStorage.getItem('user');
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null ? parsed : null;
+    } catch {
+      return null;
     }
   }
 }

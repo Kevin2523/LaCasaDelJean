@@ -1,15 +1,18 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
-// 1. Importamos el proveedor de HTTP
-import { provideHttpClient } from '@angular/common/http'; 
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { authInterceptor } from './auth.interceptor';
 
+/**
+ * ✅ V-08: Registrar el authInterceptor para que se aplique a TODAS las peticiones HTTP.
+ * El interceptor añade automáticamente withCredentials y X-Requested-With.
+ */
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZoneChangeDetection({ eventCoalescing: true }), 
+    provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
-    // 2. Lo agregamos a la lista de proveedores
-    provideHttpClient() 
+    provideHttpClient(withInterceptors([authInterceptor]))
   ]
 };
 
