@@ -1,21 +1,34 @@
 <div class="shop-container">
-  <aside class="shop-sidebar">
+  <!-- Mobile filter toggle button -->
+  <button class="mobile-filter-toggle" type="button" (click)="filtrosMobileAbierto.set(true)">
+    ☰ Filtros
+    @if (categoriasSeleccionadas().length > 0 || generoSeleccionado() !== 'Cualquiera') {
+      <span class="filter-badge">●</span>
+    }
+  </button>
+
+  <!-- Overlay for mobile drawer -->
+  @if (filtrosMobileAbierto()) {
+    <div class="mobile-overlay" (click)="filtrosMobileAbierto.set(false)"></div>
+  }
+
+  <aside class="shop-sidebar" [class.open]="filtrosMobileAbierto()">
     <div class="sidebar-header">
       <h3>Filtros</h3>
-      @if (categoriasSeleccionadas().length > 0) {
-        <button class="clear-filters-btn" type="button" (click)="limpiarCategorias()">Limpiar</button>
-      }
+      <div class="sidebar-header-actions">
+        @if (categoriasSeleccionadas().length > 0) {
+          <button class="clear-filters-btn" type="button" (click)="limpiarCategorias()">Limpiar</button>
+        }
+        <button class="mobile-close-btn" type="button" (click)="filtrosMobileAbierto.set(false)">✕</button>
+      </div>
     </div>
 
     <div class="filter-group">
       <h4>Categorías</h4>
       @for (cat of categorias(); track cat.id ?? cat.nombre) {
         <label class="filter-option">
-          <input
-            type="checkbox"
-            [checked]="categoriasSeleccionadas().includes(+cat.id)"
-            (change)="toggleCategoria(+cat.id, $any($event.target).checked)"
-          >
+          <input type="checkbox" [checked]="categoriasSeleccionadas().includes(+cat.id)"
+            (change)="toggleCategoria(+cat.id, $any($event.target).checked)">
           <span class="checkmark"></span>
           <span class="filter-label">{{ cat.nombre }}</span>
         </label>
@@ -27,11 +40,19 @@
     <div class="filter-group">
       <h4>Género</h4>
       <div class="gender-pills">
-        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Cualquiera'" (click)="generoSeleccionado.set('Cualquiera')">Todos</button>
-        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Hombre'" (click)="generoSeleccionado.set('Hombre')">Hombre</button>
-        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Mujer'" (click)="generoSeleccionado.set('Mujer')">Mujer</button>
+        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Cualquiera'"
+          (click)="generoSeleccionado.set('Cualquiera')">Unisex</button>
+        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Hombre'"
+          (click)="generoSeleccionado.set('Hombre')">Hombre</button>
+        <button type="button" class="pill" [class.active]="generoSeleccionado() === 'Mujer'"
+          (click)="generoSeleccionado.set('Mujer')">Mujer</button>
       </div>
     </div>
+
+    <!-- Mobile apply button -->
+    <button class="mobile-apply-btn" type="button" (click)="filtrosMobileAbierto.set(false)">
+      Ver {{ productosFiltrados().length }} productos
+    </button>
   </aside>
 
   <main class="shop-content">
@@ -42,12 +63,8 @@
       </div>
       <div class="toolbar-search">
         <span class="search-icon">🔍</span>
-        <input
-          type="text"
-          placeholder="Buscar productos..."
-          [value]="textoBusqueda()"
-          (input)="actualizarBusqueda($event)"
-        >
+        <input type="text" placeholder="Buscar productos..." [value]="textoBusqueda()"
+          (input)="actualizarBusqueda($event)">
       </div>
     </div>
 
@@ -55,21 +72,16 @@
       @for (prod of productosFiltrados(); track prod.id) {
         <article class="product-card">
           <div class="card-image">
-            <span class="badge-gender"
-                  [ngClass]="{
-                    'badge-hombre': mostrarGenero(prod) === 'Hombre',
-                    'badge-mujer': mostrarGenero(prod) === 'Mujer',
-                    'badge-unisex': mostrarGenero(prod) !== 'Hombre' && mostrarGenero(prod) !== 'Mujer'
-                  }">
+            <span class="badge-gender" [ngClass]="{
+              'badge-hombre': mostrarGenero(prod) === 'Hombre',
+              'badge-mujer': mostrarGenero(prod) === 'Mujer',
+              'badge-unisex': mostrarGenero(prod) !== 'Hombre' && mostrarGenero(prod) !== 'Mujer'
+            }">
               {{ mostrarGenero(prod) }}
             </span>
             <img [src]="resolverImagen(prod.imagen)" [alt]="prod.nombre" loading="lazy">
             <div class="card-overlay">
-              <button
-                class="wa-btn"
-                type="button"
-                (click)="consultarPorWhatsApp(prod)"
-              >
+              <button class="wa-btn" type="button" (click)="consultarPorWhatsApp(prod)">
                 💬 Consultar por WhatsApp
               </button>
             </div>

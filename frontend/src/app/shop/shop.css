@@ -418,17 +418,145 @@
   font-size: 0.9rem;
 }
 
-/* ── Responsive ── */
-@media (max-width: 900px) {
+/* ── Mobile-only elements (hidden on desktop) ── */
+.mobile-filter-toggle,
+.mobile-close-btn,
+.mobile-apply-btn,
+.mobile-overlay {
+  display: none;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Responsive: Mobile Drawer ── */
+@media (max-width: 768px) {
   .shop-container {
     flex-direction: column;
-    padding: 20px 16px 40px;
-    gap: 16px;
+    padding: 16px 16px 40px;
+    gap: 0;
   }
-  .shop-sidebar {
+
+  /* Toggle button visible on mobile */
+  .mobile-filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     width: 100%;
-    position: static;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--denim-dark);
+    cursor: pointer;
+    margin-bottom: 16px;
+    transition: 0.2s;
+    position: relative;
   }
+
+  .mobile-filter-toggle:hover {
+    border-color: #cbd5e1;
+  }
+
+  .filter-badge {
+    color: #2563eb;
+    font-size: 0.6rem;
+    margin-left: 2px;
+  }
+
+  /* Overlay */
+  .mobile-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.4);
+    z-index: 1200;
+    animation: fadeInOverlay 0.2s ease;
+  }
+
+  @keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* Sidebar → Bottom Drawer */
+  .shop-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 1300;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.12);
+    border: none;
+    padding: 20px 20px 24px;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .shop-sidebar.open {
+    transform: translateY(0);
+  }
+
+  /* Handle bar decorativo */
+  .shop-sidebar::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: #d1d5db;
+    border-radius: 4px;
+    margin: 0 auto 16px;
+  }
+
+  .mobile-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 14px;
+    transition: 0.15s;
+  }
+
+  .mobile-close-btn:hover {
+    background: #f1f5f9;
+    color: var(--denim-dark);
+  }
+
+  .mobile-apply-btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    margin-top: 20px;
+    background: var(--denim-dark);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  .mobile-apply-btn:hover {
+    background: #1a2744;
+  }
+
+  /* Toolbar adjustments */
   .shop-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -440,21 +568,44 @@
   .toolbar-search input {
     width: 100%;
   }
+
+  /* Grid adjustments */
   .products-grid {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
   }
   .card-image {
-    height: 200px;
+    height: 180px;
   }
   .card-overlay {
     opacity: 1;
-    background: linear-gradient(transparent 50%, rgba(15, 23, 42, 0.5));
+    background: linear-gradient(transparent 50%, rgba(15, 23, 42, 0.4));
+    justify-content: flex-end;
+    padding: 10px;
   }
   .wa-btn {
     transform: translateY(0);
+    font-size: 0;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(37, 211, 102, 0.4);
   }
-  .gender-pills {
-    flex-wrap: wrap;
+  .wa-btn::before {
+    content: '💬';
+    font-size: 1.1rem;
+  }
+  .card-body {
+    padding: 12px 12px 14px;
+  }
+  .card-title {
+    font-size: 0.85rem;
+  }
+  .card-price {
+    font-size: 1rem;
   }
 }

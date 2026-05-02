@@ -22,6 +22,7 @@ export class ShopComponent implements OnInit {
   generoSeleccionado = signal('Cualquiera');
   categoriasSeleccionadas = signal<number[]>([]);
   textoBusqueda = signal('');
+  filtrosMobileAbierto = signal(false);
 
   productosFiltrados = computed(() => {
     const busqueda = this.textoBusqueda().trim().toLowerCase();

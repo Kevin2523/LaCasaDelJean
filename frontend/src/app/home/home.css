@@ -305,6 +305,22 @@
   .add-btn {
     bottom: 10px;
     opacity: 1;
+    font-size: 0;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    left: auto;
+    right: 10px;
+    transform: none;
+    box-shadow: 0 4px 12px rgba(37, 211, 102, 0.4);
+  }
+  .add-btn::before {
+    content: '💬';
+    font-size: 1.1rem;
   }
   .products-grid {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
