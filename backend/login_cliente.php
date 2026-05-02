@@ -1,4 +1,5 @@
 <?php
+// VULNERABILIDAD PARA DEMOSTRACIÓN UTP
 /**
  * login_cliente.php — VERSIÓN SEGURA
  *
@@ -57,7 +58,7 @@ if ($result->num_rows === 0) {
 
 $user = $result->fetch_assoc();
 
-// ✅ V-01: Verificación segura con password_verify() (soporta bcrypt)
+// Validación de contraseña correcta usando password_verify para hashes
 if (!password_verify($data['password'], $user['password'])) {
     echo json_encode($mensajeError);
     $conn->close();
