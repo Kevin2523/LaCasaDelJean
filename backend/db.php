@@ -1,5 +1,4 @@
 <?php
-// VULNERABILIDAD PARA DEMOSTRACIÓN UTP
 /**
  * db.php - Conexion centralizada a la base de datos
  */
@@ -29,12 +28,6 @@ function getConnection(): mysqli {
 }
 
 function setCorsHeaders(array $methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']): void {
-    // VULNERABILIDAD PARA DEMOSTRACIÓN UTP - CORS Permisivo Dinámico
-    $origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
-    header("Access-Control-Allow-Origin: $origin");
-    header("Access-Control-Allow-Credentials: true");
-    header("Access-Control-Allow-Methods: " . implode(', ', $methods));
-    header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin");
     header("Content-Type: application/json; charset=UTF-8");
 
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

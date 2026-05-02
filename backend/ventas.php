@@ -1,5 +1,4 @@
 <?php
-// VULNERABILIDAD PARA DEMOSTRACIÓN UTP
 /**
  * ventas.php — VERSIÓN SEGURA
  *
@@ -30,22 +29,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = json_decode(file_get_contents("php://input"));
 
     // Validar entrada antes de usar
-    // VULNERABILIDAD: Eliminado el casteo a (int) para permitir inyección SQL
-    $producto_id = $data->producto_id ?? 0;
-    $cantidad    = $data->cantidad ?? 0;
+    $producto_id = (int)($data->producto_id ?? 0);
+    $cantidad    = (int)($data->cantidad ?? 0);
 
-    if ($producto_id === 0 || $cantidad <= 0) {
+    if ($producto_id <= 0 || $cantidad <= 0) {
         http_response_code(400);
         echo json_encode(["success" => false, "message" => "Datos inválidos"]);
         $conn->close();
         exit;
     }
 
-    // VULNERABILIDAD PARA DEMOSTRACIÓN UTP
-    // Concatenación directa para Inyección SQL (A05:2025)
-    $sqlProd = "SELECT precio, precio_costo, stock FROM productos WHERE id = " . $producto_id;
-    $resultProd = $conn->query($sqlProd);
-    $prod = $resultProd ? $resultProd->fetch_assoc() : null;
+    // ✅ V-02: Prepared Statement — ya no es vulnerable a SQL Injection
+    $stmtProd = $conn->prepare("SELECT precio, precio_costo, stock FROM productos WHERE id = ?");
+    $stmtProd->bind_param("i", $producto_id);
+    $stmtProd->execute();
+    $prod = $stmtProd->get_result()->fetch_assoc();
+    $stmtProd->close();
 
     if (!$prod) {
         http_response_code(404);
@@ -66,19 +65,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $itbms_total   = ($precio_venta * 0.07) * $cantidad;
     $ganancia_neta = (($precio_venta - $precio_costo) * $cantidad) - $itbms_total;
 
-    // Insertar venta (VULNERABLE)
-    $sqlInsert = "INSERT INTO ventas (producto_id, cantidad, precio_venta_momento, precio_costo_momento, itbms_acumulado, ganancia_neta_momento)
-                  VALUES ($producto_id, $cantidad, $precio_venta, $precio_costo, $itbms_total, $ganancia_neta)";
-    
-    if ($conn->query($sqlInsert)) {
-        // UPDATE también con concatenación directa
-        $sqlUpdate = "UPDATE productos SET stock = stock - $cantidad WHERE id = $producto_id";
-        $conn->query($sqlUpdate);
-        
+    // Insertar venta
+    $stmt = $conn->prepare(
+        "INSERT INTO ventas (producto_id, cantidad, precio_venta_momento, precio_costo_momento, itbms_acumulado, ganancia_neta_momento)
+         VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    $stmt->bind_param("iidddd", $producto_id, $cantidad, $precio_venta, $precio_costo, $itbms_total, $ganancia_neta);
+
+    if ($stmt->execute()) {
+        // ✅ V-02: UPDATE también con Prepared Statement
+        $stmtUpd = $conn->prepare("UPDATE productos SET stock = stock - ? WHERE id = ?");
+        $stmtUpd->bind_param("ii", $cantidad, $producto_id);
+        $stmtUpd->execute();
+        $stmtUpd->close();
         echo json_encode(["success" => true]);
     } else {
         echo json_encode(["success" => false, "message" => "Error al registrar la venta"]);
     }
+
+    $stmt->close();
 }
 
 // GET: Obtener resumen mensual para contabilidad

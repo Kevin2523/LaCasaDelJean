@@ -11,7 +11,7 @@ import { HttpClient } from '@angular/common/http';
 })
 export class ShopComponent implements OnInit {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:8000/backend/';
+  private readonly baseUrl = 'http://localhost/LaCasaDelJean/backend/';
 
   productosTienda = signal<any[]>([]);
   categorias = signal<any[]>([]);
@@ -24,6 +24,7 @@ export class ShopComponent implements OnInit {
   textoBusqueda = signal('');
 
   productosFiltrados = computed(() => {
+    const busqueda = this.textoBusqueda().trim().toLowerCase();
     const genero = this.generoSeleccionado().toLowerCase();
     const categoriasMarcadas = this.categoriasSeleccionadas();
     const filtraCategorias = categoriasMarcadas.length > 0;
@@ -35,13 +36,20 @@ export class ShopComponent implements OnInit {
       const generoProducto = (producto?.genero ?? '').toString().trim().toLowerCase();
       const categoriaId = Number(producto?.categoria_id ?? 0);
       const categoriaNombre = (producto?.categoria_nombre ?? '').toString().trim().toLowerCase();
+      const nombre = (producto?.nombre ?? '').toString().trim().toLowerCase();
+      const talla = (producto?.talla ?? '').toString().trim().toLowerCase();
 
       const coincideGenero = genero === 'cualquiera' || generoProducto === genero;
       const coincideCategoria =
         !filtraCategorias ||
         categoriasMarcadas.includes(categoriaId) ||
         categoriasActivas.includes(categoriaNombre);
-      const coincideBusqueda = true;
+      const coincideBusqueda =
+        !busqueda ||
+        nombre.includes(busqueda) ||
+        categoriaNombre.includes(busqueda) ||
+        generoProducto.includes(busqueda) ||
+        talla.includes(busqueda);
 
       return coincideGenero && coincideCategoria && coincideBusqueda;
     });
@@ -53,13 +61,8 @@ export class ShopComponent implements OnInit {
     this.cargarConfigTienda();
   }
 
-  cargarProductos(busqueda: string = '') {
-    const q = busqueda.trim();
-    const url = q
-      ? `${this.baseUrl}productos_cliente.php?q=${encodeURIComponent(q)}`
-      : `${this.baseUrl}productos_cliente.php`;
-
-    this.http.get<any>(url).subscribe({
+  cargarProductos() {
+    this.http.get<any>(`${this.baseUrl}productos_cliente.php`).subscribe({
       next: (data) => {
         const productos = this.extraerLista(data);
         this.productosTienda.set(productos);
@@ -112,9 +115,7 @@ export class ShopComponent implements OnInit {
 
   actualizarBusqueda(event: Event) {
     const input = event.target as HTMLInputElement;
-    const busqueda = input?.value ?? '';
-    this.textoBusqueda.set(busqueda);
-    this.cargarProductos(busqueda);
+    this.textoBusqueda.set(input?.value ?? '');
   }
 
   mostrarGenero(producto: any): string {
