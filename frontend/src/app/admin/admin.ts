@@ -30,11 +30,15 @@ export class AdminComponent implements OnInit {
   userInitial = computed(() => (this.userName().trim().charAt(0) || 'I').toUpperCase());
   configWhatsApp = signal<any>({ wa_principal: '', wa_secundario: '', wa_plantilla: '' });
   sidebarAbierta = signal(true);
+  today = new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   tallasParaInventario = signal<{ talla: string; stock: number }[]>([]);
   nuevaPassword = '';
 
   mostrarModal = signal(false);
   mostrarModalCat = signal(false);
+  previewImagen = signal<string>('');
+  subiendoImagen = signal(false);
+  isDragOver = false;
   productoActual = signal<any>({});
   categoriaActual = signal<any>({ nombre: '' });
   filtroCategoria = signal<string>('Todas');
@@ -294,12 +298,89 @@ export class AdminComponent implements OnInit {
       precio_costo: Number(prod.precio_costo ?? 0),
       categoria_id: prod.categoria_id ?? null
     });
+    this.previewImagen.set((prod?.imagen ?? '').toString());
     this.mostrarModal.set(true);
   }
 
   cerrarModal() {
     this.mostrarModal.set(false);
     this.productoActual.set({});
+    this.previewImagen.set('');
+    this.subiendoImagen.set(false);
+    this.isDragOver = false;
+  }
+
+  // --- Imagen Upload ---
+  onFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files[0]) {
+      this.procesarArchivo(input.files[0]);
+    }
+  }
+
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = true;
+  }
+
+  onDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+  }
+
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver = false;
+    if (event.dataTransfer?.files && event.dataTransfer.files[0]) {
+      this.procesarArchivo(event.dataTransfer.files[0]);
+    }
+  }
+
+  limpiarImagen(): void {
+    this.previewImagen.set('');
+    this.actualizarProductoCampo('imagen', '');
+  }
+
+  private procesarArchivo(archivo: File): void {
+    // Validar tipo
+    const tiposPermitidos = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!tiposPermitidos.includes(archivo.type)) {
+      Swal.fire({ icon: 'warning', title: 'Tipo no válido', text: 'Solo se aceptan imágenes JPG, PNG, WebP o GIF.' });
+      return;
+    }
+    // Validar tamaño (5 MB)
+    if (archivo.size > 5 * 1024 * 1024) {
+      Swal.fire({ icon: 'warning', title: 'Archivo muy grande', text: 'La imagen no puede superar los 5 MB.' });
+      return;
+    }
+
+    // Preview local inmediato
+    const reader = new FileReader();
+    reader.onload = (e) => this.previewImagen.set(e.target?.result as string);
+    reader.readAsDataURL(archivo);
+
+    // Subir al servidor
+    this.subiendoImagen.set(true);
+    this.apiService.subirImagen(archivo).subscribe({
+      next: (res: any) => {
+        this.subiendoImagen.set(false);
+        if (res?.success && res?.url) {
+          this.actualizarProductoCampo('imagen', res.url);
+          this.previewImagen.set(res.url);
+        } else {
+          Swal.fire({ icon: 'error', title: 'Error', text: res?.error || 'No se pudo subir la imagen.' });
+          this.previewImagen.set('');
+        }
+      },
+      error: () => {
+        this.subiendoImagen.set(false);
+        Swal.fire({ icon: 'error', title: 'Error de conexión', text: 'No se pudo subir la imagen al servidor.' });
+        this.previewImagen.set('');
+      }
+    });
   }
 
   actualizarProductoCampo(campo: string, valor: any) {
@@ -309,6 +390,10 @@ export class AdminComponent implements OnInit {
     };
 
     this.productoActual.set(siguiente);
+
+    if (campo === 'imagen') {
+      this.previewImagen.set(valor);
+    }
 
     if (campo === 'categoria_id' || campo === 'genero') {
       this.sincronizarTallasConReglas();
