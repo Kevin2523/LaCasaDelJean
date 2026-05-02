@@ -68,6 +68,12 @@ export class ApiService {
   registrarVenta(payload: { producto_id: number; cantidad: number }): Observable<any> {
     return this.http.post<any>(`${this.baseUrl}ventas.php`, payload);
   }
+
+  subirImagen(archivo: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('imagen', archivo);
+    return this.http.post<any>(`${this.baseUrl}upload_imagen.php`, formData);
+  }
 }
 
 
