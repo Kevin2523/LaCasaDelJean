@@ -1,0 +1,156 @@
+name: lacasadeljean-v2
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lcdj_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lacasadeljean_v2}
+      POSTGRES_USER: ${POSTGRES_USER:-lacasadeljean}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_STRONG_PASSWORD}
+      TZ: ${TZ:-America/Bogota}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - db_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-lacasadeljean} -d $${POSTGRES_DB:-lacasadeljean_v2}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: lcdj_api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://lacasadeljean:CHANGE_ME_STRONG_PASSWORD@postgres:5432/lacasadeljean_v2}
+      MEDIA_ROOT: ${MEDIA_ROOT:-/app/storage/media}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://127.0.0.1:4200,http://localhost:4200}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - ./storage/media:/app/storage/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - db_internal
+      - app_edge
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: lcdj_web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-4200}:8080"
+    depends_on:
+      - api
+    networks:
+      - app_edge
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+
+  hermes:
+    build:
+      context: ./services/hermes
+      dockerfile: Dockerfile
+    container_name: lcdj_hermes
+    profiles:
+      - hermes
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      API_INTERNAL_URL: http://api:8000
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+    depends_on:
+      - api
+    networks:
+      - app_edge
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: lcdj_cloudflared
+    profiles:
+      - tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - web
+      - api
+    networks:
+      - app_edge
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+networks:
+  db_internal:
+    driver: bridge
+    internal: true
+  app_edge:
+    driver: bridge
+
+volumes:
+  postgres_data:

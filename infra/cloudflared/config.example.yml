@@ -1,0 +1,15 @@
+# ==============================================================================
+# Plantilla de configuración de Cloudflare Tunnel (SIN SECRETOS NI IDs REALES)
+# Copiar a `config.yml` solo si se usa modo basado en archivo; por defecto
+# docker-compose.yml usa TUNNEL_TOKEN desde `.env` (perfil `tunnel`).
+# ==============================================================================
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: tienda.ejemplo.com
+    service: http://web:8080
+  - hostname: api.ejemplo.com
+    service: http://api:8000
+  - service: http_status:404

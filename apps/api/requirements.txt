@@ -1,0 +1,7 @@
+# Dependencias base de Fase 0 (sin lógica de negocio aún).
+# Las versiones exactas y dependencias de Fase 1+ se fijarán al iniciar Fase 1.
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.30.0,<1.0.0
+pillow>=10.4.0,<12.0.0
+psycopg[binary]>=3.2.0,<4.0.0
+pydantic-settings>=2.5.0,<3.0.0

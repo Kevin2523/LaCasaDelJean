@@ -1,64 +1,58 @@
-# La Casa del Jean - Monorepo
+# La Casa del Jean V2
 
-Este repositorio centraliza todo el código fuente de La Casa del Jean, dividido entre el cliente (Frontend) y los servicios de base de datos (Backend).
+Monorepo oficial de **La Casa del Jean V2** (Fase 0: scaffolding, configuración base y documentación).
 
-## Arquitectura de Carpetas
+> **Estado actual:** Fase 0 (base técnica y gobernanza). No contiene aún lógica de negocio de Fases 1–4.
+
+## Stack Tecnológico
+
+- **Frontend:** Angular + Tailwind CSS (`apps/web`)
+- **Backend API:** FastAPI + PostgreSQL + Pillow (`apps/api`)
+- **Base de datos:** PostgreSQL 16 (`infra/postgres`)
+- **Automatización / Agentes:** Hermes + MCP + Telegram (`services/hermes`)
+- **Almacenamiento persistente:** Volumen local `./storage/media` para imágenes procesadas con Pillow
+- **Infraestructura:** Docker Compose sobre Ubuntu Server/Desktop (dimensionado para laptop Ryzen 3 / 8 GB RAM) + Cloudflare Tunnel (`infra/cloudflared`)
+
+## Estructura del Monorepo
 
 ```text
-LaCasaDelJean/
-│
-├── backend/               # Servicios API en PHP y configuración de Base de Datos
-│   ├── index.php
-│   ├── configuracion.php
-│   └── ... (endpoints de API)
-│
-├── frontend/              # Aplicación cliente y administrador construida en Angular 17+
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── admin/
-│   │   │   ├── client-layout/
-│   │   │   ├── home/
-│   │   │   └── shop/
-│   ├── package.json
-│   └── angular.json
-│
-├── .gitignore             # Configuración global de exclusión de Git
-└── README.md              # Documentación principal del monorepo
+.
+├── apps/
+│   ├── api/                 # Backend FastAPI + Pillow (Fase 1+)
+│   └── web/                 # Frontend Angular + Tailwind (Fase 1+)
+├── services/
+│   └── hermes/              # Worker Hermes / MCP / Telegram (Fase 3+)
+├── infra/
+│   ├── cloudflared/         # Plantilla y guía de Cloudflare Tunnel
+│   └── postgres/init/       # Scripts SQL iniciales (solo bootstrapping)
+├── storage/
+│   └── media/               # Almacenamiento persistente de imágenes
+├── docs/                    # Arquitectura, seguridad, convenciones, ramas, fases y decisiones
+├── docker-compose.yml       # Orquestación mínima y segura (Ryzen 3 / 8 GB)
+├── .env.example             # Plantilla de variables sin secretos
+└── .gitignore
 ```
 
-## Pasos de Instalación y Ejecución Rápidos
+## Inicio Rápido (Validación de Fase 0)
 
-### Preparación del Entorno
-Antes de comenzar, asegúrate de tener instalado:
-- **Node.js** (v18+)
-- **PHP** (v8+) / XAMPP
-- **MySQL** o MariaDB corriendo en el puerto 3306
+1. Copiar variables de entorno de ejemplo:
+   ```bash
+   cp .env.example .env
+   ```
+2. Validar la configuración de Docker Compose:
+   ```bash
+   docker compose --env-file .env.example config
+   ```
+3. (Opcional) Validar incluyendo perfiles `hermes` y `tunnel`:
+   ```bash
+   docker compose --env-file .env.example --profile hermes --profile tunnel config
+   ```
 
-### Levantando el Frontend (Angular)
-1. Abre una terminal y colócate en la carpeta del frontend:
-   ```bash
-   cd frontend
-   ```
-2. Instala las dependencias:
-   ```bash
-   npm install
-   ```
-3. Inicia el servidor de desarrollo:
-   ```bash
-   ng serve
-   ```
-   *La web estará disponible en `http://localhost:4200`*
+## Documentación
 
-### Levantando el Backend (PHP API)
-1. Abre **otra** terminal y colócate en la carpeta del backend:
-   ```bash
-   cd backend
-   ```
-2. Inicia el servidor de desarrollo nativo de PHP:
-   ```bash
-   php -S localhost:8000
-   ```
-   *(Nota: Asegúrate de que MySQL esté encendido en tu panel de XAMPP para que la API logre conectarse a `lacasadeljean`).*
-
----
-*Mantenido y orquestado bajo estructura DevOps - Monorepo.*
+- [Arquitectura](docs/architecture.md)
+- [Seguridad](docs/security.md)
+- [Convenciones](docs/conventions.md)
+- [Estrategia de Ramas y PRs](docs/branching-and-prs.md)
+- [Plan de Fases](docs/phases.md)
+- [Registro de Decisiones (ADR)](docs/decisions.md)

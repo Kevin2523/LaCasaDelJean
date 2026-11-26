@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+docs
+storage
+infra/cloudflared/*.json
+**/node_modules
+**/.venv
+**/__pycache__
+**/.angular
+**/dist
