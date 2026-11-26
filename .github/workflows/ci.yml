@@ -46,7 +46,7 @@ jobs:
       - name: Verificar ausencia de archivos con secretos versionados
         run: |
           set -euo pipefail
-          if git ls-files | grep -E '(^\.env$|^\.env\.|infra/cloudflared/.*\.json$|infra/cloudflared/config\.yml$)'; then
+          if git ls-files | grep -vE '^\.env\.example$' | grep -E '(^\.env$|^\.env\.|infra/cloudflared/.*\.json$|infra/cloudflared/config\.yml$)'; then
             echo "ERROR: Se detectaron archivos sensibles versionados en Git."
             exit 1
           fi
