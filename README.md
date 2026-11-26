@@ -35,17 +35,18 @@ Monorepo oficial de **La Casa del Jean V2** (Fase 0: scaffolding, configuración
 
 ## Inicio Rápido (Validación de Fase 0)
 
-1. Copiar variables de entorno de ejemplo:
+1. Crear `.env` real a partir de la plantilla y reemplazar **todos** los valores `CHANGE_ME_*` con secretos propios antes de ejecutar `docker compose up`:
    ```bash
    cp .env.example .env
    ```
-2. Validar la configuración de Docker Compose:
+   > **Nota de seguridad:** `docker-compose.yml` exige `POSTGRES_PASSWORD` y `DATABASE_URL` definidos (`:?`), por lo que no levantará contenedores con contraseñas por defecto si falta `.env`.
+2. Validar la configuración de Docker Compose (sin crear `.env` aún, usando `.env.example`):
    ```bash
-   docker compose --env-file .env.example config
+   docker compose --env-file .env.example config --quiet
    ```
 3. (Opcional) Validar incluyendo perfiles `hermes` y `tunnel`:
    ```bash
-   docker compose --env-file .env.example --profile hermes --profile tunnel config
+   docker compose --env-file .env.example --profile hermes --profile tunnel config --quiet
    ```
 
 ## Documentación

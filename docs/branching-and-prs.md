@@ -9,7 +9,7 @@
 
 Crear siempre desde `develop` actualizado:
 
-- `feature/<fase-o-modulo>-<descripcion>` (o `feat/<fase-o-modulo>-<descripcion>`, ej. `feature/fase1-api-catalogo`)
+- `feature/<fase-o-modulo>-<descripcion>` (ej. `feature/fase1-api-catalogo`)
 - `fix/<modulo>-<descripcion>` (ej. `fix/api-pillow-exif`)
 - `docs/<tema>` (ej. `docs/actualizar-arquitectura`)
 - `chore/<tema>` (ej. `chore/fase0-scaffolding`)
@@ -17,11 +17,11 @@ Crear siempre desde `develop` actualizado:
 ## 3. Flujo de Pull Requests
 
 1. Crear rama de trabajo (`feature/*`, `fix/*`, `docs/*`, `chore/*`) desde `develop`.
-2. Implementar cambios pequeños y verificables (idealmente vinculados a un Issue de GitHub).
-3. Verificar que el workflow de CI (`.github/workflows/ci.yml`) y las validaciones locales pasen (`docker compose config`, linters y tests correspondientes).
+2. Implementar cambios pequeños y verificables (vinculados a un Issue de GitHub).
+3. Verificar que el workflow de CI (`.github/workflows/ci.yml`) y las validaciones locales pasen (`docker compose --env-file .env.example config --quiet`, linters y tests correspondientes).
 4. Abrir PR hacia `develop` (nunca directo a `main` para trabajo regular).
 5. Revisión y merge (squash o merge commit limpio según tamaño).
-6. **Promoción a `main`:** la promoción futura de `develop` hacia `main` se realiza **únicamente mediante Pull Request explícitamente autorizado** tras cerrar y validar la fase correspondiente (el despliegue y push de imágenes quedan para Fase 4).
+6. **Promoción a `main`:** la apertura de un PR de `develop -> main` se realiza **únicamente con autorización expresa** tras cerrar y validar la fase correspondiente (el despliegue y push de imágenes quedan para Fase 4).
 
 ## 4. Regla de Convivencia V1 -> V2
 

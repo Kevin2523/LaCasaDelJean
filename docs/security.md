@@ -14,6 +14,7 @@
 
 - `.env` está ignorado en `.gitignore` y `.dockerignore`.
 - `.env.example` contiene **únicamente** valores de plantilla (`CHANGE_ME_*`), nunca credenciales reales.
+- **Uso obligatorio de `.env` real:** `docker-compose.yml` no define contraseñas por defecto para PostgreSQL (`POSTGRES_PASSWORD:?` y `DATABASE_URL:?`), impidiendo que la base de datos arranque con credenciales conocidas si falta `.env`. Antes de levantar servicios en local o servidor, copia `.env.example` a `.env` y reemplaza todos los `CHANGE_ME_*`.
 - Los archivos `infra/cloudflared/*.json` y `infra/cloudflared/config.yml` están ignorados por Git.
 - Antes de pasar a producción (Fase 4), se debe:
   - Generar `JWT_SECRET_KEY`, `POSTGRES_PASSWORD` y `HERMES_MCP_SHARED_SECRET` con entropía criptográfica (`secrets.token_urlsafe(48)`).
