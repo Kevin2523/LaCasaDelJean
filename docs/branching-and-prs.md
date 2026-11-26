@@ -9,19 +9,19 @@
 
 Crear siempre desde `develop` actualizado:
 
-- `feat/<fase-o-modulo>-<descripcion>` (ej. `feat/fase1-api-catalogo`)
+- `feature/<fase-o-modulo>-<descripcion>` (o `feat/<fase-o-modulo>-<descripcion>`, ej. `feature/fase1-api-catalogo`)
 - `fix/<modulo>-<descripcion>` (ej. `fix/api-pillow-exif`)
 - `docs/<tema>` (ej. `docs/actualizar-arquitectura`)
 - `chore/<tema>` (ej. `chore/fase0-scaffolding`)
 
 ## 3. Flujo de Pull Requests
 
-1. Crear rama de trabajo desde `develop`.
+1. Crear rama de trabajo (`feature/*`, `fix/*`, `docs/*`, `chore/*`) desde `develop`.
 2. Implementar cambios pequeños y verificables (idealmente vinculados a un Issue de GitHub).
-3. Verificar localmente (`docker compose config`, linters y tests correspondientes).
+3. Verificar que el workflow de CI (`.github/workflows/ci.yml`) y las validaciones locales pasen (`docker compose config`, linters y tests correspondientes).
 4. Abrir PR hacia `develop` (nunca directo a `main` para trabajo regular).
 5. Revisión y merge (squash o merge commit limpio según tamaño).
-6. Al cerrar una fase completa y validada en `develop`, abrir PR de release `develop -> main`.
+6. **Promoción a `main`:** la promoción futura de `develop` hacia `main` se realiza **únicamente mediante Pull Request explícitamente autorizado** tras cerrar y validar la fase correspondiente (el despliegue y push de imágenes quedan para Fase 4).
 
 ## 4. Regla de Convivencia V1 -> V2
 
