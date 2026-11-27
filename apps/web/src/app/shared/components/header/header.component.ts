@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { InquiryCartService } from '../../../core/services/inquiry-cart.service';
 
 @Component({
   selector: 'app-header',
@@ -77,6 +78,21 @@ import { Router, RouterLink, RouterLinkActive } from '@angular/router';
           >
             Catálogo
           </a>
+          <a
+            routerLink="/carrito"
+            routerLinkActive="bg-denim-soft text-denim font-semibold"
+            class="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-ink-secondary transition-colors hover:bg-cream-warm hover:text-denim"
+          >
+            <span>Consultas</span>
+            @if (cart.totalUnits() > 0) {
+              <span
+                class="inline-flex min-w-[20px] items-center justify-center rounded-full bg-terracotta px-1.5 py-0.5 text-[11px] font-bold leading-none text-white"
+                [attr.aria-label]="cart.totalUnits() + ' prendas en tu lista de consulta'"
+              >
+                {{ cart.totalUnits() }}
+              </span>
+            }
+          </a>
         </nav>
 
         <!-- Quick Search (Desktop) -->
@@ -107,25 +123,49 @@ import { Router, RouterLink, RouterLinkActive } from '@angular/router';
           </div>
         </form>
 
-        <!-- Mobile Menu Button -->
-        <button
-          type="button"
-          (click)="toggleMobileMenu()"
-          [attr.aria-expanded]="mobileMenuOpen()"
-          aria-controls="mobile-nav"
-          aria-label="Abrir menú de navegación"
-          class="inline-flex items-center justify-center rounded-lg border border-border bg-white p-2 text-denim hover:bg-cream-warm md:hidden"
-        >
-          @if (mobileMenuOpen()) {
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+        <!-- Mobile Quick Cart + Menu Button -->
+        <div class="flex items-center gap-2 md:hidden">
+          <a
+            routerLink="/carrito"
+            (click)="closeMobileMenu()"
+            aria-label="Ver lista de consulta"
+            class="relative inline-flex items-center justify-center rounded-lg border border-border bg-white p-2 text-denim hover:bg-cream-warm"
+          >
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" aria-hidden="true">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15.75 10.5V6a3.75 3.75 0 1 0-7.5 0v4.5m11.356-1.993 1.263 12c.07.665-.45 1.243-1.119 1.243H4.25a1.125 1.125 0 0 1-1.12-1.243l1.264-12A1.125 1.125 0 0 1 5.513 7.5h12.974c.576 0 1.059.435 1.119 1.007Z"
+              />
             </svg>
-          } @else {
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
-          }
-        </button>
+            @if (cart.totalUnits() > 0) {
+              <span
+                class="absolute -right-1.5 -top-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-terracotta px-1 py-0.5 text-[10px] font-bold leading-none text-white"
+              >
+                {{ cart.totalUnits() }}
+              </span>
+            }
+          </a>
+
+          <button
+            type="button"
+            (click)="toggleMobileMenu()"
+            [attr.aria-expanded]="mobileMenuOpen()"
+            aria-controls="mobile-nav"
+            aria-label="Abrir menú de navegación"
+            class="inline-flex items-center justify-center rounded-lg border border-border bg-white p-2 text-denim hover:bg-cream-warm"
+          >
+            @if (mobileMenuOpen()) {
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            } @else {
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              </svg>
+            }
+          </button>
+        </div>
       </div>
 
       <!-- Mobile Navigation Drawer -->
@@ -168,6 +208,19 @@ import { Router, RouterLink, RouterLinkActive } from '@angular/router';
             >
               Catálogo completo
             </a>
+            <a
+              routerLink="/carrito"
+              (click)="closeMobileMenu()"
+              routerLinkActive="bg-denim-soft text-denim font-semibold"
+              class="flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium text-ink-secondary hover:bg-cream-warm"
+            >
+              <span>Lista de consulta</span>
+              @if (cart.totalUnits() > 0) {
+                <span class="rounded-full bg-terracotta px-2 py-0.5 text-xs font-bold text-white">
+                  {{ cart.totalUnits() }}
+                </span>
+              }
+            </a>
           </nav>
         </div>
       }
@@ -178,7 +231,10 @@ export class HeaderComponent {
   readonly mobileMenuOpen = signal(false);
   searchTerm = '';
 
-  constructor(private readonly router: Router) {}
+  constructor(
+    private readonly router: Router,
+    readonly cart: InquiryCartService
+  ) {}
 
   toggleMobileMenu(): void {
     this.mobileMenuOpen.update((open) => !open);
