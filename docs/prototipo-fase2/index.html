@@ -136,9 +136,12 @@
           <h1 id="catalog-heading" class="section-title">Catálogo</h1>
           <p id="catalog-count" style="margin:6px 0 0;font-size:0.875rem;color:var(--ink-secondary);"></p>
         </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-          <input id="search-input" class="input" type="search" placeholder="Buscar prendas o SKU..." style="width:220px;" aria-label="Buscar prendas" />
-          <select id="sort-select" class="select" style="width:185px;" aria-label="Ordenar catálogo">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button type="button" class="btn btn-secondary btn-sm mobile-filter-toggle" id="mobile-filter-toggle" aria-expanded="false" aria-controls="catalog-filter-sidebar">
+            ☰ Filtros
+          </button>
+          <input id="search-input" class="input" type="search" placeholder="Buscar prendas o SKU..." style="width:190px;flex:1;" aria-label="Buscar prendas" />
+          <select id="sort-select" class="select" style="width:170px;" aria-label="Ordenar catálogo">
             <option value="featured">Ordenar: Destacados</option>
             <option value="price-asc">Precio: menor a mayor</option>
             <option value="price-desc">Precio: mayor a menor</option>
@@ -148,7 +151,7 @@
       </div>
 
       <div class="catalog-layout">
-        <aside class="filter-sidebar" aria-label="Filtros del catálogo">
+        <aside class="filter-sidebar" id="catalog-filter-sidebar" aria-label="Filtros del catálogo">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
             <strong style="font-size:1rem;color:var(--denim);">Filtros</strong>
             <button type="button" class="btn btn-ghost btn-sm" id="clear-filters-btn" style="color:var(--terracotta);">Limpiar</button>

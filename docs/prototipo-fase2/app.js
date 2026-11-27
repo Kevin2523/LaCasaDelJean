@@ -466,10 +466,10 @@
           </div>
         </td>
         <td><span class="cat-pill">${p.categoryLabel}</span></td>
-        <td><strong>${formatPrice(p.price)}</strong></td>
-        <td>${stk} u.</td>
-        <td><span class="status-pill ${statusClass}">● ${statusLabel}</span></td>
-        <td><button type="button" class="btn btn-secondary btn-sm" data-adjust-stock="${p.id}">Ajustar</button></td>
+        <td class="nowrap"><strong>${formatPrice(p.price)}</strong></td>
+        <td class="nowrap">${stk} u.</td>
+        <td class="nowrap"><span class="status-pill ${statusClass}">● ${statusLabel}</span></td>
+        <td class="nowrap"><button type="button" class="btn btn-secondary btn-sm" data-adjust-stock="${p.id}">Ajustar</button></td>
       `;
       tbody.appendChild(tr);
     });
@@ -524,6 +524,11 @@
   $("#mobile-menu-btn").addEventListener("click", () => {
     const open = $("#mobile-nav").classList.toggle("is-open");
     $("#mobile-menu-btn").setAttribute("aria-expanded", String(open));
+  });
+
+  $("#mobile-filter-toggle").addEventListener("click", () => {
+    const open = $("#catalog-filter-sidebar").classList.toggle("is-open");
+    $("#mobile-filter-toggle").setAttribute("aria-expanded", String(open));
   });
 
   $("#search-input").addEventListener("input", (e) => { state.filters.search = e.target.value; renderCatalog(); });

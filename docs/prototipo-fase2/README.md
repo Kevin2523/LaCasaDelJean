@@ -41,9 +41,10 @@ Abrir en el navegador: `http://localhost:4173` (o abrir directamente `docs/proto
 
 | Uso en prototipo | Autor | Licencia | Fuente verificable |
 | --- | --- | --- | --- |
-| Hero / Jean Tiro Alto Slim | Tobias ToMar Maier | CC BY-SA 4.0 | https://commons.wikimedia.org/wiki/File:Sedcard_outfit_consisting_of_white_top_(bodysuit),_(blue)_denim_and_heels.jpg |
-| Colección Denim / Miniatura | Jcjeansandclothes | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Jeans_Jeans_Jeans.jpg |
-| Jean Clásico Índigo / Cat. Jeans | Olgierd Rudak | CC BY-SA 4.0 | https://commons.wikimedia.org/wiki/File:Broken_twill_denim_Wrangler_13MWZ_jeans_(2026-01-21).jpg |
+| Hero campaña denim a color | Jcjeansandclothes | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Jeans_Jeans_Jeans.jpg |
+| Colección Denim (panel lateral) | El Nuevo Doge | CC0 | https://commons.wikimedia.org/wiki/File:Jeans_mexicanos.jpg |
+| Jean Clásico Índigo / Cat. Jeans | Leo-setä | CC BY 2.0 | https://commons.wikimedia.org/wiki/File:%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_(3953687892).jpg |
+| Jean Tiro Alto Slim | Imani Bahati | CC0 | https://commons.wikimedia.org/wiki/File:Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg |
 | Chaqueta Denim Tradicional | NikosLikomitros | CC0 | https://commons.wikimedia.org/wiki/File:Jean_jacket.jpg |
 | Camisa Denim / Cat. Caballeros | May Lee | CC BY-SA 2.0 | https://commons.wikimedia.org/wiki/File:Man_wearing_blue_denim_shirt_with_rolled_sleeves,_tan_chinos_1.jpg |
 | Pantalón Chino Algodón Arena | Kuha455405 | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Chino_pants.jpg |

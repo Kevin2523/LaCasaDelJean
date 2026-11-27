@@ -14,19 +14,19 @@ window.LCDJ_DATA = {
   },
 
   heroImage: {
-    url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg/960px-Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    alt: "Modelo vistiendo jeans denim azul clásico y top blanco minimalista",
-    author: "Tobias ToMar Maier",
-    license: "CC BY-SA 4.0",
-    source: "https://commons.wikimedia.org/wiki/File:Sedcard_outfit_consisting_of_white_top_(bodysuit),_(blue)_denim_and_heels.jpg"
-  },
-
-  denimStackImage: {
     url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/01/Jeans_Jeans_Jeans.jpg/960px-Jeans_Jeans_Jeans.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    alt: "Colección de jeans denim doblados en distintos lavados",
+    alt: "Campaña editorial de modelos vistiendo jeans y camisas denim azul índigo",
     author: "Jcjeansandclothes",
     license: "CC BY-SA 3.0",
     source: "https://commons.wikimedia.org/wiki/File:Jeans_Jeans_Jeans.jpg"
+  },
+
+  denimStackImage: {
+    url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/99/Jeans_mexicanos.jpg/960px-Jeans_mexicanos.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    alt: "Pantalones jeans denim azul en exhibición",
+    author: "El Nuevo Doge",
+    license: "CC0",
+    source: "https://commons.wikimedia.org/wiki/File:Jeans_mexicanos.jpg"
   },
 
   categories: [
@@ -38,7 +38,7 @@ window.LCDJ_DATA = {
     {
       id: "jeans",
       label: "Jeans",
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/00/Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg/960px-Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/48/%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg/960px-%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
     },
     {
       id: "damas",
@@ -86,11 +86,11 @@ window.LCDJ_DATA = {
       color: "Índigo",
       colorId: "indigo",
       swatches: ["#1B365D", "#4D739B", "#1F2937"],
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/00/Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg/960px-Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/48/%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg/960px-%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
-        author: "Olgierd Rudak",
-        license: "CC BY-SA 4.0",
-        source: "https://commons.wikimedia.org/wiki/File:Broken_twill_denim_Wrangler_13MWZ_jeans_(2026-01-21).jpg"
+        author: "Leo-setä",
+        license: "CC BY 2.0",
+        source: "https://commons.wikimedia.org/wiki/File:%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_(3953687892).jpg"
       },
       sizes: [
         { size: "28", stock: 6 },
@@ -116,11 +116,11 @@ window.LCDJ_DATA = {
       color: "Azul Medio",
       colorId: "azul-medio",
       swatches: ["#4D739B", "#1B365D"],
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg/960px-Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a9/Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg/960px-Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
-        author: "Tobias ToMar Maier",
-        license: "CC BY-SA 4.0",
-        source: "https://commons.wikimedia.org/wiki/File:Sedcard_outfit_consisting_of_white_top_(bodysuit),_(blue)_denim_and_heels.jpg"
+        author: "Imani Bahati",
+        license: "CC0",
+        source: "https://commons.wikimedia.org/wiki/File:Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg"
       },
       sizes: [
         { size: "6", stock: 5 },
