@@ -1,47 +1,91 @@
 // Datos simulados (mock) exclusivos para el prototipo visual — Etapa A (Fase 2)
 // Sin conexión a base de datos ni llamadas a FastAPI.
-// Todas las fotografías son ilustrativas con licencia verificable (Wikimedia Commons).
+// Todas las fotografías son reales con licencia verificable (Wikimedia Commons).
+// Nota de moneda: "B/." se muestra como referencia visual; su definición frente al contrato COP del backend queda pendiente para Etapa B.
 
 window.LCDJ_DATA = {
   store: {
     name: "La Casa del Jean",
-    tagline: "Moda denim y básicos esenciales para toda la familia en Panamá.",
+    tagline: "Calidad, comodidad y el fit perfecto para tu día a día.",
     whatsappDisplay: "+507 6522-6428",
-    location: "Ciudad de Panamá, Panamá",
+    location: "San Carlos, Panamá",
     hours: "Lun – Sáb · 9:00 a.m. – 7:00 p.m.",
     currency: "B/."
   },
 
   heroImage: {
+    url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg/960px-Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    alt: "Modelo vistiendo jeans denim azul clásico y top blanco minimalista",
+    author: "Tobias ToMar Maier",
+    license: "CC BY-SA 4.0",
+    source: "https://commons.wikimedia.org/wiki/File:Sedcard_outfit_consisting_of_white_top_(bodysuit),_(blue)_denim_and_heels.jpg"
+  },
+
+  denimStackImage: {
     url: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/01/Jeans_Jeans_Jeans.jpg/960px-Jeans_Jeans_Jeans.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
-    alt: "Pila de jeans denim doblados en distintos tonos de azul",
+    alt: "Colección de jeans denim doblados en distintos lavados",
     author: "Jcjeansandclothes",
     license: "CC BY-SA 3.0",
     source: "https://commons.wikimedia.org/wiki/File:Jeans_Jeans_Jeans.jpg"
   },
 
   categories: [
-    { id: "todos", label: "Todos" },
-    { id: "damas", label: "Damas" },
-    { id: "caballeros", label: "Caballeros" },
-    { id: "ninos", label: "Niños y Familia" },
-    { id: "basicos", label: "Básicos y Chaquetas" }
+    {
+      id: "todos",
+      label: "Todos",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/01/Jeans_Jeans_Jeans.jpg/960px-Jeans_Jeans_Jeans.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      id: "jeans",
+      label: "Jeans",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/00/Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg/960px-Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      id: "damas",
+      label: "Damas",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/27/Denim_jacket_details.jpg/960px-Denim_jacket_details.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      id: "caballeros",
+      label: "Caballeros",
+      image: "https://upload.wikimedia.org/wikipedia/commons/e/ec/Man_wearing_blue_denim_shirt_with_rolled_sleeves%2C_tan_chinos_1.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+    },
+    {
+      id: "ninos",
+      label: "Niños y Familia",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/27/Man_in_marini%C3%A8re_with_child.jpg/960px-Man_in_marini%C3%A8re_with_child.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      id: "basicos",
+      label: "Básicos",
+      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d1/Various_colors_of_polo_shirt_at_JCPenney.jpg/960px-Various_colors_of_polo_shirt_at_JCPenney.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    }
+  ],
+
+  colors: [
+    { id: "indigo", label: "Índigo", hex: "#1B365D" },
+    { id: "azul-medio", label: "Azul Medio", hex: "#4D739B" },
+    { id: "oscuro", label: "Azul Oscuro", hex: "#1F2937" },
+    { id: "arena", label: "Arena", hex: "#C8B398" },
+    { id: "terracota", label: "Terracota / Surtido", hex: "#B85A34" }
   ],
 
   products: [
     {
       id: "lcdj-001",
       sku: "DJ-CAB-101",
-      name: "Jean Recto Clásico Índigo",
-      category: "caballeros",
-      categoryLabel: "Caballeros",
+      name: "Jean Clásico Índigo",
+      category: "jeans",
+      categoryLabel: "Jeans",
       price: 38.50,
       badge: "Más buscado",
       featured: true,
-      description: "Corte recto atemporal en mezclilla resistente de 12 oz. Ideal para uso diario en el clima de Panamá con costura reforzada y caída cómoda.",
+      description: "Jean de corte recto, cómodo y resistente en mezclilla de 12 oz. Ideal para el uso diario con un estilo versátil que combina con todo.",
       material: "98% Algodón, 2% Elastano",
       fit: "Straight Fit · Tiro medio",
-      color: "Índigo Clásico",
+      color: "Índigo",
+      colorId: "indigo",
+      swatches: ["#1B365D", "#4D739B", "#1F2937"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/00/Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg/960px-Broken_twill_denim_Wrangler_13MWZ_jeans_%282026-01-21%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "Olgierd Rudak",
@@ -60,16 +104,18 @@ window.LCDJ_DATA = {
     {
       id: "lcdj-002",
       sku: "DJ-DAM-204",
-      name: "Jean Tiro Alto Silueta Estilizada",
+      name: "Jean Tiro Alto Slim",
       category: "damas",
       categoryLabel: "Damas",
       price: 42.00,
       badge: "Nueva llegada",
       featured: true,
-      description: "Denim suave con elasticidad controlada que acompaña el movimiento sin perder su forma. Acabado limpio en azul medio.",
+      description: "Denim suave con elasticidad controlada que estiliza la silueta sin perder comodidad. Acabado limpio en azul medio.",
       material: "92% Algodón, 6% Poliéster, 2% Elastano",
       fit: "High-Rise Slim · Tiro alto",
       color: "Azul Medio",
+      colorId: "azul-medio",
+      swatches: ["#4D739B", "#1B365D"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fe/Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg/960px-Sedcard_outfit_consisting_of_white_top_%28bodysuit%29%2C_%28blue%29_denim_and_heels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "Tobias ToMar Maier",
@@ -90,14 +136,16 @@ window.LCDJ_DATA = {
       sku: "CH-BAS-301",
       name: "Chaqueta Denim Tradicional",
       category: "basicos",
-      categoryLabel: "Básicos y Chaquetas",
+      categoryLabel: "Básicos",
       price: 49.00,
       badge: "Esencial",
       featured: true,
-      description: "Chaqueta de mezclilla estructurada con bolsillos frontales y botones metálicos. Una prenda versátil para combinar en cualquier temporada.",
+      description: "Chaqueta de mezclilla estructurada con bolsillos frontales y botones metálicos. Una prenda versátil para combinar en cualquier ocasión.",
       material: "100% Algodón Denim",
       fit: "Regular Fit",
-      color: "Azul Lavado",
+      color: "Azul Medio",
+      colorId: "azul-medio",
+      swatches: ["#4D739B", "#1B365D"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/06/Jean_jacket.jpg/960px-Jean_jacket.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "NikosLikomitros",
@@ -121,10 +169,12 @@ window.LCDJ_DATA = {
       price: 34.00,
       badge: "",
       featured: true,
-      description: "Camisa ligera de algodón chambray pensada para climas cálidos. Funciona abierta sobre camiseta o abotonada para un look casual limpio.",
+      description: "Camisa ligera de algodón chambray pensada para el clima cálido de Panamá. Funciona abierta sobre camiseta o abotonada.",
       material: "100% Algodón Ligero",
       fit: "Tailored Casual",
-      color: "Celeste Denim",
+      color: "Azul Medio",
+      colorId: "azul-medio",
+      swatches: ["#4D739B", "#C8B398"],
       image: "https://upload.wikimedia.org/wikipedia/commons/e/ec/Man_wearing_blue_denim_shirt_with_rolled_sleeves%2C_tan_chinos_1.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
       attribution: {
         author: "May Lee",
@@ -148,10 +198,12 @@ window.LCDJ_DATA = {
       price: 36.00,
       badge: "",
       featured: false,
-      description: "Alternativa fresca al denim tradicional en sarga de algodón peinado. Bolsillos traseros de ojal y acabado suave al tacto.",
+      description: "Alternativa fresca al denim tradicional en sarga de algodón peinado. Bolsillos traseros de ojal y acabado suave.",
       material: "97% Algodón, 3% Elastano",
       fit: "Slim Straight",
-      color: "Arena / Khaki",
+      color: "Arena",
+      colorId: "arena",
+      swatches: ["#C8B398", "#1F2937"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3e/Chino_pants.jpg/960px-Chino_pants.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "Kuha455405",
@@ -164,7 +216,7 @@ window.LCDJ_DATA = {
         { size: "34", stock: 5 },
         { size: "36", stock: 2 }
       ],
-      status: "Publicado"
+      status: "Borrador"
     },
     {
       id: "lcdj-006",
@@ -178,7 +230,9 @@ window.LCDJ_DATA = {
       description: "Prendas frescas de algodón transpirable pensadas para fines de semana en familia. Tejido suave y lavado fácil.",
       material: "100% Algodón Peinado",
       fit: "Comfort Fit",
-      color: "Blanco / Marino",
+      color: "Índigo",
+      colorId: "indigo",
+      swatches: ["#1B365D", "#F5F2EB"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/27/Man_in_marini%C3%A8re_with_child.jpg/960px-Man_in_marini%C3%A8re_with_child.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "DimiTalen",
@@ -206,6 +260,8 @@ window.LCDJ_DATA = {
       material: "100% Algodón Denim",
       fit: "Relaxed Fit",
       color: "Azul Oscuro",
+      colorId: "oscuro",
+      swatches: ["#1F2937", "#1B365D"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/27/Denim_jacket_details.jpg/960px-Denim_jacket_details.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "Shixart1985",
@@ -225,14 +281,16 @@ window.LCDJ_DATA = {
       sku: "PL-BAS-315",
       name: "Polo Piqué Clásico Colección Color",
       category: "basicos",
-      categoryLabel: "Básicos y Chaquetas",
+      categoryLabel: "Básicos",
       price: 22.00,
       badge: "",
       featured: false,
       description: "Camiseta polo en tejido piqué transpirable para combinar con jeans o chinos. Cuello estructurado que mantiene su forma.",
       material: "100% Algodón Piqué",
       fit: "Classic Fit",
-      color: "Surtido Neutro",
+      color: "Terracota / Surtido",
+      colorId: "terracota",
+      swatches: ["#B85A34", "#1B365D", "#C8B398"],
       image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d1/Various_colors_of_polo_shirt_at_JCPenney.jpg/960px-Various_colors_of_polo_shirt_at_JCPenney.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
       attribution: {
         author: "Ser Amantio di Nicolao",
@@ -249,16 +307,14 @@ window.LCDJ_DATA = {
     }
   ],
 
+  recentMovements: [
+    { type: "in", title: "Entrada de stock", detail: "Jean Clásico Índigo · +10 u.", time: "Hace 25 min" },
+    { type: "out", title: "Salida de stock", detail: "Camisa Denim · −2 u.", time: "Hace 1 h" },
+    { type: "in", title: "Entrada de stock", detail: "Chaqueta Denim Tradicional · +5 u.", time: "Hace 2 h" }
+  ],
+
   initialCart: [
-    {
-      productId: "lcdj-001",
-      size: "32",
-      qty: 1
-    },
-    {
-      productId: "lcdj-002",
-      size: "8",
-      qty: 1
-    }
+    { productId: "lcdj-001", size: "32", qty: 1 },
+    { productId: "lcdj-002", size: "8", qty: 1 }
   ]
 };
