@@ -25,5 +25,5 @@ USER appuser
 
 EXPOSE 8000
 
-# Placeholder de Fase 0: en Fase 1 se reemplazará por `uvicorn app.main:app`
-CMD ["python", "-m", "http.server", "8000"]
+# Ejecutar API FastAPI con Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
