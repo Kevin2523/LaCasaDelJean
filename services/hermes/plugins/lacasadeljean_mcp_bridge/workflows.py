@@ -321,3 +321,71 @@ class ProposalWorkflowManager:
             prop.status = "executed" if result.get("ok") else "failed"
 
         return result
+
+    def confirm_proposal_sync(
+        self,
+        *,
+        proposal_id: str,
+        telegram_user_id: int,
+        session_id: str,
+        bridge_client: TrustedMCPBridgeClient,
+        now: float | None = None,
+        approval_ttl_seconds: int = 60,
+    ) -> dict[str, Any]:
+        """Synchronous confirmation for Hermes v0.23.4 post_gateway_admission hook (no asyncio.run)."""
+        self._check_allowlist(telegram_user_id)
+        current = time.time() if now is None else now
+
+        with self._lock:
+            prop = self._proposals.get(proposal_id)
+            if prop is None:
+                raise WorkflowError("PROPOSAL_NOT_FOUND", f"Propuesta '{proposal_id}' no encontrada.")
+            if prop.telegram_user_id != telegram_user_id:
+                raise WorkflowError(
+                    "UNAUTHORIZED_APPROVER",
+                    "Solo el operador dueño de la propuesta puede confirmarla.",
+                )
+            if prop.session_id != session_id:
+                raise WorkflowError(
+                    "SESSION_MISMATCH",
+                    "La confirmación debe ocurrir en la misma conversación/sesión de la propuesta.",
+                )
+            if prop.status == "cancelled":
+                raise WorkflowError("PROPOSAL_CANCELLED", "La propuesta fue cancelada y no puede ejecutarse.")
+            if prop.status in ("confirmed", "executed"):
+                raise WorkflowError(
+                    "APPROVAL_REPLAYED",
+                    "Esta propuesta ya fue confirmada (aprobación de un solo uso).",
+                )
+            if prop.status == "expired" or prop.is_expired(current):
+                prop.status = "expired"
+                raise WorkflowError("PROPOSAL_EXPIRED", "La propuesta expiró; solicita una nueva vista previa.")
+            if prop.status != "pending":
+                raise WorkflowError("PROPOSAL_NOT_PENDING", f"Estado inválido de propuesta: {prop.status}.")
+
+            prop.status = "confirmed"
+            try:
+                self.approval_store.record_human_confirmation(
+                    telegram_user_id=telegram_user_id,
+                    action=prop.action,
+                    arguments=dict(prop.arguments),
+                    idempotency_key=prop.idempotency_key,
+                    signing_secret=self.config.approval_signing_secret,
+                    ttl_seconds=approval_ttl_seconds,
+                )
+            except BridgeSecurityError as exc:
+                prop.status = "failed"
+                raise WorkflowError(exc.code, exc.message) from exc
+
+        result = bridge_client.call_tool_sync(
+            tool_name=prop.action,
+            arguments=dict(prop.arguments),
+            telegram_user_id=telegram_user_id,
+            request_id=f"tg-confirm-{prop.proposal_id}",
+        )
+
+        with self._lock:
+            prop.execution_result = result
+            prop.status = "executed" if result.get("ok") else "failed"
+
+        return result

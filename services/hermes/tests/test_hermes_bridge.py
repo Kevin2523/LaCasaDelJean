@@ -61,7 +61,12 @@ def test_plugin_manifest_and_register_ctx_official_v0234() -> None:
         (REPO_ROOT / "services/hermes/plugins/lacasadeljean_mcp_bridge/plugin.yaml").read_text(encoding="utf-8")
     )
     assert set(manifest["provides_tools"]) == set(TOOL_SCHEMAS.keys())
-    assert set(manifest["provides_hooks"]) == {"pre_llm_call", "pre_tool_call", "on_session_end"}
+    assert set(manifest["provides_hooks"]) == {
+        "post_gateway_admission",
+        "pre_llm_call",
+        "pre_tool_call",
+        "on_session_end",
+    }
 
     registered_hooks: dict[str, Any] = {}
     registered_tools: dict[str, dict[str, Any]] = {}
@@ -74,7 +79,12 @@ def test_plugin_manifest_and_register_ctx_official_v0234() -> None:
             registered_tools[name] = {"schema": schema, "handler": handler, "toolset": toolset}
 
     register(DummyHermesCtx())
-    assert set(registered_hooks.keys()) == {"pre_llm_call", "pre_tool_call", "on_session_end"}
+    assert set(registered_hooks.keys()) == {
+        "post_gateway_admission",
+        "pre_llm_call",
+        "pre_tool_call",
+        "on_session_end",
+    }
     assert set(registered_tools.keys()) == set(TOOL_SCHEMAS.keys())
 
 
@@ -93,7 +103,7 @@ def test_pre_llm_call_cross_session_isolation_and_restart_fail_closed() -> None:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"ok": True}})
 
     registry = SessionActorRegistry()
-    pre_llm, pre_tool, on_end, handlers = build_hooks_and_handlers(
+    _, pre_llm, pre_tool, on_end, handlers = build_hooks_and_handlers(
         config=_make_config(),
         session_registry=registry,
         transport=httpx.MockTransport(handler),
@@ -132,7 +142,7 @@ def test_pre_llm_call_cross_session_isolation_and_restart_fail_closed() -> None:
 
 def test_pre_tool_call_blocks_disallowed_tools_and_spoofing() -> None:
     registry = SessionActorRegistry()
-    pre_llm, pre_tool, _, _ = build_hooks_and_handlers(config=_make_config(), session_registry=registry)
+    _, pre_llm, pre_tool, _, _ = build_hooks_and_handlers(config=_make_config(), session_registry=registry)
     assert pre_llm(session_id="sess-A", platform="telegram", sender_id=ALLOWED_USER_A) is None
 
     for bad_tool in ("terminal", "browser_navigate", "sql_query", "execute_code"):
@@ -154,20 +164,21 @@ def test_trusted_approval_store_seam_for_issue_12() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"ok": True, "price": "49.95"}})
 
-    registry = SessionActorRegistry()
     approvals = TrustedApprovalStore()
-    pre_llm, _, _, handlers = build_hooks_and_handlers(
-        config=_make_config(),
-        session_registry=registry,
+    client = TrustedMCPBridgeClient(
+        _make_config(),
+        sync_transport=httpx.MockTransport(handler),
         approval_store=approvals,
-        transport=httpx.MockTransport(handler),
     )
-    assert pre_llm(session_id="sess-A", platform="telegram", sender_id=ALLOWED_USER_A) is None
 
     write_args = {"product_id": "prod-1", "amount_pab": "49.95", "idempotency_key": "idem-p1"}
 
     # Without human confirmation -> blocked
-    unconfirmed = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    unconfirmed = client.call_tool_sync(
+        tool_name="set_product_price",
+        arguments=write_args,
+        telegram_user_id=ALLOWED_USER_A,
+    )
     assert unconfirmed["ok"] is False
     assert unconfirmed["error"]["code"] == "APPROVAL_REQUIRED"
 
@@ -179,12 +190,20 @@ def test_trusted_approval_store_seam_for_issue_12() -> None:
         idempotency_key="idem-p1",
         signing_secret=APPROVAL_SECRET,
     )
-    confirmed = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    confirmed = client.call_tool_sync(
+        tool_name="set_product_price",
+        arguments=write_args,
+        telegram_user_id=ALLOWED_USER_A,
+    )
     assert confirmed["ok"] is True
     assert confirmed["result"]["price"] == "49.95"
 
     # Proof is one-use in store -> replay blocked
-    replay = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    replay = client.call_tool_sync(
+        tool_name="set_product_price",
+        arguments=write_args,
+        telegram_user_id=ALLOWED_USER_A,
+    )
     assert replay["ok"] is False
     assert replay["error"]["code"] == "APPROVAL_REQUIRED"
 
@@ -336,7 +355,7 @@ async def test_registry_dispatch_contract_inside_running_event_loop() -> None:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "loop-1", "result": {"ok": True}})
 
     registry = SessionActorRegistry()
-    pre_llm, pre_tool, _, handlers = build_hooks_and_handlers(
+    _, pre_llm, pre_tool, _, handlers = build_hooks_and_handlers(
         config=_make_config(),
         session_registry=registry,
         transport=httpx.MockTransport(sync_mcp_handler),

@@ -1,45 +1,41 @@
 # Fase 3 — Flujos de Telegram y Confirmación Explícita (`docs/fase3-telegram-workflows.md`)
 
-Documentación técnica del Issue #12 (**F3-03**) para operar el catálogo e inventario de **La Casa del Jean V2** desde Telegram a través de **Hermes Agent v0.23.4** y el servidor MCP privado (`services/mcp`).
+Documentación técnica del Issue #12 (**F3-03**) para operar el catálogo e inventario de **La Casa del Jean V2** desde Telegram a través de **Hermes Agent v0.23.4** (`lacasadeljean-mcp-bridge`) y el servidor MCP privado (`services/mcp`).
 
 ---
 
-## 1. Arquitectura de Bot Único y Multi-Operador
+## 1. Integración Oficial Hermes v0.23.4 (Hooks + Herramientas)
 
-- **Un solo bot de Telegram:** Gestionado por Hermes (`gateway run`) con `TELEGRAM_BOT_TOKEN` y `TELEGRAM_ALLOWED_USERS` (IDs numéricos).
-- **Mapeo a roles de backend:** Cada llamada a herramienta MCP firma un `X-Actor-Assertion` por operador; `services/mcp` lo intercambia en FastAPI por un JWT con el rol real del operador (`admin` / `vendedor`).
-- **Aislamiento por usuario/sesión:** Cada operador mantiene su propia conversación y sus propias propuestas pendientes (`ProposalWorkflowManager`), compartiendo el mismo catálogo en FastAPI/PostgreSQL.
-- **Fail-closed:** Usuarios no listados en `TELEGRAM_ALLOWED_USERS` o sin mapeo activo en backend son rechazados antes de ejecutar cualquier herramienta.
+- **Herramientas expuestas al LLM (`provides_tools`):** Únicamente las 3 herramientas de **solo lectura** (`search_products`, `get_product_detail`, `get_variant_stock`) y la herramienta **no mutante** `propose_inventory_write`.
+- **Las 6 herramientas de escritura NO están expuestas al modelo:** `pre_tool_call` bloquea cualquier intento del modelo de invocar directamente `create_product_draft`, `create_variant`, `attach_product_photo`, `set_product_price`, `record_stock_movement` o `set_product_publication_status`.
+- **Hook oficial `post_gateway_admission`:** Intercepta respuestas humanas `CONFIRMAR <proposal_id>` / `CANCELAR <proposal_id>` tras la autenticación del gateway, valida `platform == "telegram"`, `source.user_id` en `TELEGRAM_ALLOWED_USERS` y coincidencia exacta de `session_key`, ejecuta la escritura **fuera del LLM** vía `TrustedMCPBridgeClient` → `services/mcp` → FastAPI, y retorna `{"action": "handled", "reply": "..."}` omitiendo el turno del modelo.
+- **Roles reales de backend:** `admin` y `operator` (mapeados por `telegram_user_id` en FastAPI; RBAC aplicado en FastAPI/MCP).
 
 ---
 
 ## 2. Flujo Propuesta → Vista Previa → Confirmación / Cancelación
 
-Implementado en `services/hermes/plugins/lacasadeljean_mcp_bridge/workflows.py`:
-
-1. **Propuesta (`create_proposal`):** Valida allowlist, acción en `WRITE_TOOLS`, ausencia de argumentos falsificados, genera/vincula `idempotency_key` y calcula `scoped_payload_sha256`. **No muta inventario.**
-2. **Vista previa (`format_proposal_preview`):** Presenta los datos exactos (operación, origen `text`/`photo`/`voice`, precios en **PAB**, clave de idempotencia y tiempo de expiración `HERMES_PROPOSAL_TTL_SECONDS`, por defecto `120s`).
-3. **Confirmación explícita (`confirm_proposal`):**
-   - Verifica dueño (`telegram_user_id`), misma sesión (`session_id`), estado `pending` y no expiración.
-   - Emite un `approval_proof` firmado de **un solo uso** en `TrustedApprovalStore` (nunca expuesto al LLM) vinculado a `(telegram_user_id, action, exact args, idempotency_key)`.
-   - Ejecuta la escritura exclusivamente vía `TrustedMCPBridgeClient` → `services/mcp` → FastAPI (con auditoría e idempotencia durable en PostgreSQL).
-4. **Cancelación (`cancel_proposal`):** Marca la propuesta como `cancelled`; cualquier confirmación posterior falla cerrado (`PROPOSAL_CANCELLED`).
-5. **Anti-replay e idempotencia:** Re-confirmar una propuesta ejecutada falla con `APPROVAL_REPLAYED`; reintentar con la misma `idempotency_key` no duplica la mutación.
+1. El operador envía texto, foto o nota de voz (STT nativo de Hermes) en su chat privado con el bot único.
+2. `pre_llm_call` valida `TELEGRAM_ALLOWED_USERS` y vincula `session_id` / `session_key` al `telegram_user_id` (fail-closed tras reinicio).
+3. El modelo consulta catálogo y llama a `propose_inventory_write` (no muta inventario), devolviendo una vista previa estructurada en **PAB** con `proposal_id`, `idempotency_key` y caducidad (`HERMES_PROPOSAL_TTL_SECONDS`, default `120s`).
+4. El operador responde explícitamente `CONFIRMAR <proposal_id>` o `CANCELAR <proposal_id>`.
+5. `post_gateway_admission` intercepta el comando fuera del LLM, emite `approval_proof` de un solo uso en `TrustedApprovalStore` y ejecuta la mutación vía MCP → FastAPI con auditoría e idempotencia durable.
+6. Cualquier intento de otro usuario, otra sesión, propuesta expirada, cancelada o repetida falla cerrado (`UNAUTHORIZED_APPROVER`, `SESSION_MISMATCH`, `PROPOSAL_EXPIRED`, `PROPOSAL_CANCELLED`, `APPROVAL_REPLAYED`).
 
 ---
 
-## 3. Fotos (3 Opciones del Operador) y Notas de Voz
+## 3. Fotos (3 Opciones del Operador) y Límite de Búsqueda Externa
 
-Implementado en `services/hermes/plugins/lacasadeljean_mcp_bridge/media.py` y `services/hermes/config/SOUL.md`:
+`propose_inventory_write` integra `media.py` para `attach_product_photo`:
 
-- **Opción 1 — Foto original (`original`):** Valida con Pillow y elimina metadatos EXIF manteniendo dimensiones originales.
-- **Opción 2 — Optimización con Pillow (`pillow_optimize`):** Auto-orienta, redimensiona, aplica mejora suave de contraste/nitidez, convierte a WebP y elimina EXIF.
-- **Opción 3 — Búsqueda web de modelo exacto (`exact_model_web_search`):** Solo para tenis o productos comerciales verificables. Exige coincidencia exacta de marca, modelo y código (`MODEL_IDENTITY_MISMATCH` / `MODEL_CODE_MISMATCH`) **y** licencia permitida (`brand_press_kit`, `authorized_distributor`, `merchant_owned`, `cc0`, `cc_by`, `cc_by_sa`, `public_domain`). Rechaza cualquier imagen con copyright arbitrario o licencia desconocida (`COPYRIGHT_LICENSE_REJECTED`).
-- **Notas de voz:** Usan el STT nativo configurado en Hermes (`config.yaml` → `stt`), sin segundo bot ni servicio Whisper separado.
+- **`original`:** Valida con Pillow y elimina metadatos EXIF manteniendo dimensiones originales.
+- **`pillow_optimize`:** Auto-orienta, redimensiona, aplica mejora suave de contraste/nitidez, convierte a WebP y elimina EXIF.
+- **`exact_model_web_search`:** Solo para tenis o productos comerciales verificables. Exige coincidencia exacta de marca, modelo y código (`MODEL_IDENTITY_MISMATCH` / `MODEL_CODE_MISMATCH`) **y** licencia permitida (`brand_press_kit`, `authorized_distributor`, `merchant_owned`, `cc0`, `cc_by`, `cc_by_sa`, `public_domain`). Rechaza copyright arbitrario o licencia desconocida (`COPYRIGHT_LICENSE_REJECTED`).
+  - **Límite documentado:** El plugin no hace scraping web arbitrario. Si no hay un proveedor autorizado de búsqueda de imágenes configurado que entregue un candidato con licencia verificada (`external_image_candidate`), falla cerrado con `EXTERNAL_SEARCH_PROVIDER_REQUIRED` y solicita al operador elegir `original` o `pillow_optimize`.
 
 ---
 
-## 4. Demo Local End-to-End (sin token real)
+## 4. Demo Local End-to-End (Flujo Gateway Oficial, sin token real)
 
 ```bash
 PYTHONPATH=. uv run --with httpx --with pyjwt --with pillow --with "mcp<2" --with starlette --with pydantic-settings \
