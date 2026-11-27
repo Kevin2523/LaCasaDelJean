@@ -8,10 +8,11 @@ Este documento describe la integración oficial de **NousResearch Hermes Agent (
 
 - **Imagen oficial versionada:** `nousresearch/hermes-agent:v0.23.4` (configurable con `HERMES_IMAGE_TAG=v0.23.4`).
 - **Un solo contenedor gateway:** `lcdj_hermes` ejecutando `gateway run` en el perfil `hermes` de `docker-compose.yml`.
-- **Persistencia en `/opt/data`:** Volumen nombrado Linux `hermes_data:/opt/data` (almacena `config.yaml` escribible para migraciones `_config_version`, sesiones, memoria, credenciales OAuth `auth.json` y logs internos), con archivos de plantilla e instrucciones montados en solo lectura:
-  - `./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro` (se copia a `/opt/data/config.yaml` al inicializar para no bloquear migraciones de configuración con `EROFS`)
-  - `./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro`
-  - `./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro`
+- **Persistencia y bootstrap idempotente en `/opt/data`:** Volumen nombrado Linux `hermes_data:/opt/data` (almacena `config.yaml` escribible para migraciones `_config_version`, sesiones, memoria, credenciales OAuth `auth.json` y logs internos).
+  - El servicio one-shot `hermes_init` (`alpine:3.20`, `restart: "no"`, perfil `hermes`) ejecuta `services/hermes/scripts/init-hermes-config.sh` **antes** del gateway (`depends_on: hermes_init: condition: service_completed_successfully`).
+  - En el primer arranque copia `./services/hermes/config/config.yaml` (`/opt/data/config.template.yaml:ro`) a `/opt/data/config.yaml` con permisos escribibles por el UID efectivo no-root del contenedor. En arranques posteriores **no sobrescribe** `/opt/data/config.yaml`.
+  - **Actualizaciones planificadas de configuración:** Para reemplazar `/opt/data/config.yaml` con una nueva plantilla tras un cambio revisado, ejecutar `HERMES_FORCE_CONFIG_RESET=true docker compose --profile hermes run --rm hermes_init` (o fusionar manualmente los cambios en `/opt/data/config.yaml`).
+  - `./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro` y `./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro` se montan en solo lectura.
 - **Sin puertos publicados:** Ni el API server (`8642`) ni el dashboard de Hermes se exponen al host (`gateway.api_server.enabled: false`, `gateway.dashboard.enabled: false` y sin directiva `ports:` en `docker-compose.yml`).
 - **Reinicio y rotación de logs:** `restart: unless-stopped` y `logging: json-file` (`max-size: 10m`, `max-file: 3`).
 - **Aislamiento de red:** Conectado únicamente a `app_edge` (habla con `http://mcp:8010/mcp`). **Nunca** conectado a `db_internal` ni con acceso directo a PostgreSQL.

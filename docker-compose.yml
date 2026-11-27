@@ -126,6 +126,28 @@ services:
           cpus: "0.50"
           memory: 256M
 
+  hermes_init:
+    image: alpine:3.20
+    container_name: lcdj_hermes_init
+    profiles:
+      - hermes
+    restart: "no"
+    command: ["sh", "/usr/local/bin/init-hermes-config.sh"]
+    environment:
+      HERMES_DATA_DIR: /opt/data
+      HERMES_FORCE_CONFIG_RESET: ${HERMES_FORCE_CONFIG_RESET:-false}
+    volumes:
+      - hermes_data:/opt/data
+      - ./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro
+      - ./services/hermes/scripts/init-hermes-config.sh:/usr/local/bin/init-hermes-config.sh:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
   hermes:
     image: nousresearch/hermes-agent:${HERMES_IMAGE_TAG:-v0.23.4}
     container_name: lcdj_hermes
@@ -160,7 +182,10 @@ services:
       - ./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro
       - ./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro
     depends_on:
-      - mcp
+      hermes_init:
+        condition: service_completed_successfully
+      mcp:
+        condition: service_started
     networks:
       - app_edge
     logging:

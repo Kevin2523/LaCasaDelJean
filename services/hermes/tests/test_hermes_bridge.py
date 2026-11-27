@@ -381,3 +381,24 @@ def test_hermes_config_yaml_has_no_static_mcp_bypass() -> None:
     assert cfg["_config_version"] == 54
     assert cfg["stt"]["enabled"] is True
     assert "lacasadeljean-mcp-bridge" in cfg["plugins"]["enabled"]
+
+
+def test_compose_has_hermes_init_bootstrap_and_completed_dependency() -> None:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    services = compose["services"]
+
+    assert "hermes" in services["mcp"]["profiles"]
+    assert "hermes_init" in services
+    init_svc = services["hermes_init"]
+    assert init_svc["profiles"] == ["hermes"]
+    assert init_svc["restart"] == "no"
+    assert any("config.template.yaml:ro" in v for v in init_svc["volumes"])
+    assert any("init-hermes-config.sh:ro" in v for v in init_svc["volumes"])
+
+    hermes_svc = services["hermes"]
+    assert hermes_svc["depends_on"]["hermes_init"]["condition"] == "service_completed_successfully"
+    assert "ports" not in hermes_svc
+
+    script = (REPO_ROOT / "services/hermes/scripts/init-hermes-config.sh").read_text(encoding="utf-8")
+    assert "HERMES_FORCE_CONFIG_RESET" in script
+    assert 'if [ ! -f "${TARGET}" ]' in script
