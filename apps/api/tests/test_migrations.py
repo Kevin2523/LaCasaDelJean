@@ -9,6 +9,7 @@ from sqlalchemy import Engine, inspect
 EXPECTED_TABLES = {
     "roles",
     "users",
+    "auth_sessions",
     "categories",
     "products",
     "variants",
