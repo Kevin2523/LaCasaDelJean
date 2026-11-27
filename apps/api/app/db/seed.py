@@ -112,9 +112,9 @@ def seed_development_data(session: Session) -> dict[str, int]:
             Price(
                 product_id=product.id,
                 variant_id=None,
-                amount_cop=Decimal("149900.00"),
-                compare_at_cop=Decimal("179900.00"),
-                currency="COP",
+                amount_pab=Decimal("149900.00"),
+                compare_at_pab=Decimal("179900.00"),
+                currency="PAB",
                 is_current=True,
             )
         )

@@ -8,8 +8,15 @@ Servicio API de **La Casa del Jean V2** sobre **FastAPI**, **PostgreSQL** y **SQ
 - `GET /health`
 - `GET /api/v1/categories` (paginación, `parent_id`, `search`)
 - `GET /api/v1/categories/{category_id}` y `GET /api/v1/categories/slug/{slug}`
-- `GET /api/v1/products` (paginación, `category_id`, `category_slug`, `search`, `size`, `color`, `in_stock`, `min_price_cop`, `max_price_cop`, `sort_by`)
+- `GET /api/v1/products` (paginación, `category_id`, `category_slug`, `search`, `size`, `color`, `in_stock`, `min_price_pab`, `max_price_pab`, `sort_by`)
 - `GET /api/v1/products/{product_id}` y `GET /api/v1/products/slug/{slug}`
+
+Los precios usan la moneda oficial `PAB` (balboa panameño). La API recibe y devuelve
+`amount_pab`, `compare_at_pab` y `currency: "PAB"`; los filtros públicos son
+`min_price_pab` y `max_price_pab`. Los importes JSON conservan dos decimales como
+strings. `B/.` es solo el símbolo de presentación de la interfaz; la migración
+`20261127_0003` cambia la etiqueta de moneda de los registros existentes sin
+convertir sus valores numéricos.
 
 ### Protegidos (Catálogo Admin e Inventario)
 - `POST /api/v1/admin/categories`, `PATCH /api/v1/admin/categories/{category_id}`

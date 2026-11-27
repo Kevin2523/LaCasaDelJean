@@ -10,7 +10,7 @@
 | Regla | Estándar | Notas |
 | --- | --- | --- |
 | **Identificadores** | `UUID` (v4, `uuid.UUID`, PostgreSQL `UUID`) | Generados por aplicación o `gen_random_uuid()`. Serializados como string RFC 4122 en JSON. |
-| **Precios / Moneda** | `Decimal` en **COP** (`NUMERIC(12, 2)`) | Sin `float`. `currency` por defecto `"COP"` (`CHAR(3)`). Serializados como string decimal fijo (`"149900.00"`) en JSON para evitar pérdida de precisión. |
+| **Precios / Moneda** | `Decimal` en **PAB** (`NUMERIC(12, 2)`) | Sin `float`. `currency` por defecto `"PAB"` (`CHAR(3)`). Serializados como string decimal fijo (`"149900.00"`) en JSON para evitar pérdida de precisión. `B/.` es solo símbolo de presentación, nunca código de moneda ni conversión de importes. |
 | **Estado de publicación** | Enum explícito `publication_status` | Valores: `draft`, `published`, `archived`. Nunca booleanos implícitos como `is_active` para publicación. |
 | **Timestamps** | `TIMESTAMPTZ` en **UTC** | Siempre almacenados en UTC (`DateTime(timezone=True)`). Serializados en ISO-8601 UTC (`2026-11-26T20:00:00Z`). |
 | **Cantidades de inventario** | `INTEGER` | `StockBalance.quantity >= 0`. `StockMovement.quantity > 0` acompañado de `direction` (`in` \| `out`). |
@@ -71,16 +71,16 @@ Combinación física vendible de un producto por **talla (`size`)** y **color (`
 - **Unicidad compuesta:** `UNIQUE (product_id, size, color)` (`uq_variants_product_size_color`).
 
 ### 2.4 `Price` (`prices`)
-Precio vigente o histórico en **COP** asociado a una `Variant` (o a nivel `Product` si `variant_id` es nulo).
+Precio vigente o histórico en **PAB** asociado a una `Variant` (o a nivel `Product` si `variant_id` es nulo).
 
 | Campo | Tipo SQL / Python | Restricciones |
 | --- | --- | --- |
 | `id` | `UUID` | PK |
 | `product_id` | `UUID` | FK -> `products.id` (`ON DELETE CASCADE`), `NOT NULL`, índice |
 | `variant_id` | `UUID` | FK -> `variants.id` (`ON DELETE CASCADE`), `NULL`, índice |
-| `amount_cop` | `NUMERIC(12, 2)` | `NOT NULL`, `CHECK (amount_cop >= 0)` |
-| `compare_at_cop` | `NUMERIC(12, 2)` | `NULL`, `CHECK (compare_at_cop IS NULL OR compare_at_cop >= amount_cop)` |
-| `currency` | `CHAR(3)` | `NOT NULL`, default `'COP'`, `CHECK (currency = 'COP')` |
+| `amount_pab` | `NUMERIC(12, 2)` | `NOT NULL`, `CHECK (amount_pab >= 0)` |
+| `compare_at_pab` | `NUMERIC(12, 2)` | `NULL`, `CHECK (compare_at_pab IS NULL OR compare_at_pab >= amount_pab)` |
+| `currency` | `CHAR(3)` | `NOT NULL`, default `'PAB'`, `CHECK (currency = 'PAB')` |
 | `is_current` | `BOOLEAN` | `NOT NULL`, default `true` |
 | `valid_from` | `TIMESTAMPTZ` | `NOT NULL`, UTC |
 | `valid_to` | `TIMESTAMPTZ` | `NULL`, UTC, `CHECK (valid_to IS NULL OR valid_to > valid_from)` |
@@ -277,7 +277,7 @@ Todas las respuestas de error en Fase 1+ seguirán un sobre estándar:
 
 | Código de Error | HTTP | Cuándo ocurre |
 | --- | --- | --- |
-| `VALIDATION_ERROR` | `422` | Violación de esquema, `quantity <= 0`, precio negativo, moneda distinta de `COP`, estado inválido. |
+| `VALIDATION_ERROR` | `422` | Violación de esquema, `quantity <= 0`, precio negativo, moneda distinta de `PAB`, estado inválido. |
 | `RESOURCE_NOT_FOUND` | `404` | `product_id`, `variant_id`, `category_id` o `user_id` inexistente. |
 | `CONFLICT` | `409` | Violación de unicidad (`sku`, `slug`, `email`, `(product_id, size, color)`). |
 | `INSUFFICIENT_STOCK` | `409` | Intento de salida (`out`) mayor al stock disponible (`quantity - reserved_quantity`). |
