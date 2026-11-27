@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "dev-only-insecure-jwt-secret-change-me-before-production"
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 60
+    hermes_mcp_shared_secret: str = ""
+    mcp_session_ttl_minutes: int = 5
 
     @property
     def cors_origins_list(self) -> list[str]:

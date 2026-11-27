@@ -115,10 +115,13 @@ def test_admin_list_and_upload_rbac_and_persistence(
         assert uploaded["alt_text"] == "Foto frontal jean"
         assert uploaded["storage_path"].startswith(f"products/{product_id}/")
 
-        # Uploaded file is served via /media/
+        # Uploaded file is served via /media/ (re-encoded by Pillow without metadata)
         media_resp = client.get(f"/media/{uploaded['storage_path']}")
         assert media_resp.status_code == 200
-        assert media_resp.content == png_bytes
+        assert len(media_resp.content) == uploaded["size_bytes"]
+        with PilImage.open(io.BytesIO(media_resp.content)) as served_img:
+            assert served_img.size == (40, 30)
+            assert served_img.format == "PNG"
 
         # Reject invalid MIME type
         bad_upload = client.post(
