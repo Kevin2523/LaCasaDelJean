@@ -6,7 +6,7 @@ import { CategorySummary, ProductListItem, PublicationStatus } from '../../../co
 import { AdminApiService } from '../../../core/services/admin-api.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { formatPab } from '../../../core/utils/format-pab';
-import { resolveCatalogImageUrl } from '../../../core/utils/media-placeholders';
+import { getPlaceholderPhoto, resolveCatalogImageUrl } from '../../../core/utils/media-placeholders';
 import { ConfirmDialogComponent } from '../components/confirm-dialog.component';
 
 @Component({
@@ -169,6 +169,7 @@ import { ConfirmDialogComponent } from '../components/confirm-dialog.component';
                         <img
                           [src]="imageUrl(item)"
                           [alt]="item.name"
+                          (error)="onImageError($event, item)"
                           class="h-12 w-10 rounded-lg border border-border object-cover"
                         />
                         <div class="min-w-0">
@@ -627,6 +628,15 @@ export class AdminInventoryPageComponent implements OnInit {
 
   imageUrl(item: ProductListItem): string {
     return resolveCatalogImageUrl(item.primary_image?.storage_path, item.slug || item.category_slug);
+  }
+
+  onImageError(event: Event, item: ProductListItem): void {
+    const img = event.target as HTMLImageElement | null;
+    if (!img || img.dataset['fallbackApplied']) {
+      return;
+    }
+    img.dataset['fallbackApplied'] = 'true';
+    img.src = getPlaceholderPhoto(item.category_slug || item.slug).url;
   }
 
   statusLabel(status: PublicationStatus): string {
