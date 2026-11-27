@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     database_url: str = "postgresql+psycopg://lacasadeljean:lacasadeljean@localhost:5432/lacasadeljean_v2"
+    cors_origins: str = "http://127.0.0.1:4200,http://localhost:4200"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Return parsed list of allowed CORS origins."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 @lru_cache(maxsize=1)
