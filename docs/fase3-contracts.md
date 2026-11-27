@@ -45,7 +45,7 @@ Toda invocación de herramienta MCP (`tools/call`) debe incluir el header HTTP `
 - Endpoints internos en `apps/api` (protegidos por `X-Internal-MCP-Token: <HERMES_MCP_SHARED_SECRET>`, fail-closed si no está configurado):
   - `POST /api/v1/internal/mcp/exchange`: consume atómicamente `actor_jti` en PostgreSQL, verifica `User` activo con `telegram_user_id` coincidente y emite un Bearer JWT de corta duración (`5 min`) respaldado por `AuthSession` y auditado (`mcp_exchange`).
   - `POST /api/v1/internal/mcp/nonces/consume`: consume atómicamente `approval_proof.jti` en PostgreSQL (un solo uso duradero).
-  - `POST /api/v1/internal/mcp/idempotency/{claim,complete,release}`: reserva, persiste o libera claves de idempotencia de forma atómica en PostgreSQL.
+  - `POST /api/v1/internal/mcp/idempotency/{claim,complete}`: reserva (`pending`) y persiste (`completed`) claves de idempotencia de forma atómica en PostgreSQL. **No existe liberación automática (`release`)**: si la llamada HTTP falla con resultado ambiguo (pérdida de respuesta o `5xx` tras un posible commit), la clave permanece en `pending` y el servidor devuelve `IDEMPOTENCY_RECONCILIATION_REQUIRED` para impedir duplicados en reintentos. **Todas las escrituras MCP exigen `idempotency_key` obligatoria.**
 - `services/mcp` es completamente stateless (sin estado crítico en memoria y sin acceso a PostgreSQL) y usa el Bearer JWT emitido por FastAPI en todas las llamadas a `/api/v1/admin/*` y `/api/v1/inventory/*`.
 
 ### 2.4 Dependencia con #11 / #12 (Puente Confiable por Llamada en Hermes)

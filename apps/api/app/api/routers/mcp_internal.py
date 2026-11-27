@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import Field
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -65,12 +65,6 @@ class IdempotencyCompleteRequest(ApiModel):
     idempotency_key: str = Field(min_length=1, max_length=128)
     response_status: int
     response_body: dict[str, Any]
-
-
-class IdempotencyReleaseRequest(ApiModel):
-    actor_user_id: uuid.UUID
-    action: str = Field(min_length=1, max_length=64)
-    idempotency_key: str = Field(min_length=1, max_length=128)
 
 
 def _require_internal_mcp_token(
@@ -199,7 +193,9 @@ def claim_mcp_idempotency(
     if existing.request_hash != payload.request_hash:
         raise ConflictError("idempotency_key reutilizada con parámetros distintos.")
     if existing.status != "completed":
-        raise ConflictError("Operación idempotente ya en progreso; reintenta en breve.")
+        raise ConflictError(
+            "Operación idempotente en progreso o pendiente de reconciliación; no se re-ejecuta para evitar duplicados."
+        )
 
     return IdempotencyClaimResponse(
         state="completed",
@@ -228,23 +224,4 @@ def complete_mcp_idempotency(
         record.response_body = payload.response_body
         record.updated_at = utcnow()
         db.commit()
-    return {"ok": True}
-
-
-@router.post("/idempotency/release")
-def release_mcp_idempotency(
-    payload: IdempotencyReleaseRequest,
-    _auth: None = Depends(_require_internal_mcp_token),
-    db: Session = Depends(get_db),
-) -> dict[str, bool]:
-    """Release a pending idempotency claim if the upstream write failed."""
-    db.execute(
-        delete(MCPIdempotencyRecord).where(
-            MCPIdempotencyRecord.actor_user_id == payload.actor_user_id,
-            MCPIdempotencyRecord.action == payload.action,
-            MCPIdempotencyRecord.idempotency_key == payload.idempotency_key,
-            MCPIdempotencyRecord.status == "pending",
-        )
-    )
-    db.commit()
     return {"ok": True}

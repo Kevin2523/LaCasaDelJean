@@ -35,7 +35,7 @@ from app.db.session import build_engine, build_session_factory  # noqa: E402
 from app.main import create_app as create_api_app  # noqa: E402
 from app.models.audit import AuditEvent  # noqa: E402
 from app.models.auth import Role, User  # noqa: E402
-from app.models.catalog import Category, Product  # noqa: E402
+from app.models.catalog import Category, Price, Product  # noqa: E402
 from app.models.inventory import StockBalance  # noqa: E402
 
 _saved_app_modules = {k: v for k, v in sys.modules.items() if k == "app" or k.startswith("app.")}
@@ -136,11 +136,12 @@ def env_stack(pg_database_url: str, tmp_path: Path):
         mcp_approval_signing_secret=APPROVAL_SECRET,
     )
 
-    def build_mcp_app():
-        return create_mcp_app(settings=mcp_settings, api_transport=api_transport)
+    def build_mcp_app(custom_transport: httpx.AsyncBaseTransport | None = None):
+        return create_mcp_app(settings=mcp_settings, api_transport=custom_transport or api_transport)
 
     yield {
         "build_mcp_app": build_mcp_app,
+        "api_transport": api_transport,
         "session_factory": session_factory,
         "media_root": media_root,
         **ids,
@@ -258,12 +259,39 @@ async def test_mcp_contracts_rbac_approval_exif_and_durable_replay_after_restart
                     "tools/call",
                     {
                         "name": "create_product_draft",
-                        "arguments": {**draft_scoped, "approval_proof": viewer_draft_proof},
+                        "arguments": {
+                            **draft_scoped,
+                            "idempotency_key": "idem-viewer-01",
+                            "approval_proof": viewer_draft_proof,
+                        },
                     },
                     actor_assertion=sign_actor_assertion(telegram_user_id=100002, secret=ACTOR_SECRET),
                 )
             )
             assert viewer_write["ok"] is False and viewer_write["error"]["code"] == "FORBIDDEN"
+
+            # Missing / blank idempotency_key rejected on writes
+            blank_key = _extract_tool_json(
+                await _mcp_call(
+                    client,
+                    "tools/call",
+                    {
+                        "name": "create_product_draft",
+                        "arguments": {
+                            **draft_scoped,
+                            "idempotency_key": "   ",
+                            "approval_proof": sign_approval_proof(
+                                telegram_user_id=100001,
+                                action="create_product_draft",
+                                payload=draft_scoped,
+                                secret=APPROVAL_SECRET,
+                            ),
+                        },
+                    },
+                    actor_assertion=sign_actor_assertion(telegram_user_id=100001, secret=ACTOR_SECRET),
+                )
+            )
+            assert blank_key["ok"] is False and blank_key["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
 
             # 4. Operator creates product draft (approval_proof required on draft!)
             created = _extract_tool_json(
@@ -529,6 +557,134 @@ async def test_mcp_contracts_rbac_approval_exif_and_durable_replay_after_restart
                     select(AuditEvent).where(AuditEvent.actor_user_id == operator_user_id)
                 ).all()
                 assert {"mcp_exchange", "created", "stock_replenished"}.issubset({a.action for a in audits})
+
+
+@pytest.mark.asyncio
+async def test_lost_response_after_commit_keeps_pending_and_blocks_duplicate_retry(
+    env_stack: dict[str, Any],
+) -> None:
+    """If FastAPI commits a write but the HTTP response is lost, pending claim prevents duplicate retry."""
+    build_mcp_app = env_stack["build_mcp_app"]
+    base_transport: httpx.AsyncBaseTransport = env_stack["api_transport"]
+    category_id = env_stack["category_id"]
+    session_factory = env_stack["session_factory"]
+
+    class DropAfterCommitTransport(httpx.AsyncBaseTransport):
+        def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+            self._inner = inner
+            self.price_posts = 0
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            response = await self._inner.handle_async_request(request)
+            if request.method == "POST" and request.url.path.endswith("/prices"):
+                self.price_posts += 1
+                if self.price_posts == 1:
+                    raise httpx.ReadError("simulated connection drop after FastAPI commit")
+            return response
+
+    flaky_transport = DropAfterCommitTransport(base_transport)
+    mcp_app = build_mcp_app(custom_transport=flaky_transport)
+
+    async with mcp_app.router.lifespan_context(mcp_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_app),
+            base_url="http://mcp.internal",
+        ) as client:
+            draft_scoped = {
+                "category_id": category_id,
+                "sku": "JEAN-DROP-001",
+                "name": "Jean Drop Test",
+                "slug": "jean-drop-test",
+                "description": None,
+            }
+            created = _extract_tool_json(
+                await _mcp_call(
+                    client,
+                    "tools/call",
+                    {
+                        "name": "create_product_draft",
+                        "arguments": {
+                            **draft_scoped,
+                            "idempotency_key": "idem-drop-prod-1",
+                            "approval_proof": sign_approval_proof(
+                                telegram_user_id=100001,
+                                action="create_product_draft",
+                                payload=draft_scoped,
+                                secret=APPROVAL_SECRET,
+                            ),
+                        },
+                    },
+                    actor_assertion=sign_actor_assertion(telegram_user_id=100001, secret=ACTOR_SECRET),
+                )
+            )
+            assert created["ok"] is True
+            product_id = created["data"]["id"]
+
+            # 1st attempt: FastAPI commits price, transport drops response -> IDEMPOTENCY_RECONCILIATION_REQUIRED
+            price_scoped = {
+                "product_id": product_id,
+                "variant_id": None,
+                "amount_pab": "45.00",
+                "compare_at_pab": None,
+                "currency": "PAB",
+            }
+            first_try = _extract_tool_json(
+                await _mcp_call(
+                    client,
+                    "tools/call",
+                    {
+                        "name": "set_product_price",
+                        "arguments": {
+                            "product_id": product_id,
+                            "amount_pab": "45.00",
+                            "idempotency_key": "idem-drop-price-1",
+                            "approval_proof": sign_approval_proof(
+                                telegram_user_id=100001,
+                                action="set_product_price",
+                                payload=price_scoped,
+                                secret=APPROVAL_SECRET,
+                            ),
+                        },
+                    },
+                    actor_assertion=sign_actor_assertion(telegram_user_id=100001, secret=ACTOR_SECRET),
+                )
+            )
+            assert first_try["ok"] is False
+            assert first_try["error"]["code"] == "IDEMPOTENCY_RECONCILIATION_REQUIRED"
+            assert flaky_transport.price_posts == 1
+
+            # 2nd attempt with same idempotency_key: blocked by pending claim, NEVER calls POST /prices again!
+            second_try = _extract_tool_json(
+                await _mcp_call(
+                    client,
+                    "tools/call",
+                    {
+                        "name": "set_product_price",
+                        "arguments": {
+                            "product_id": product_id,
+                            "amount_pab": "45.00",
+                            "idempotency_key": "idem-drop-price-1",
+                            "approval_proof": sign_approval_proof(
+                                telegram_user_id=100001,
+                                action="set_product_price",
+                                payload=price_scoped,
+                                secret=APPROVAL_SECRET,
+                            ),
+                        },
+                    },
+                    actor_assertion=sign_actor_assertion(telegram_user_id=100001, secret=ACTOR_SECRET),
+                )
+            )
+            assert second_try["ok"] is False
+            assert second_try["error"]["code"] == "CONFLICT"
+            assert flaky_transport.price_posts == 1
+
+            # Verify exactly 1 Price row exists in PostgreSQL
+            with session_factory() as db:
+                prices = db.scalars(
+                    select(Price).where(Price.product_id == uuid.UUID(product_id))
+                ).all()
+                assert len(prices) == 1
 
 
 def test_mcp_service_has_zero_database_imports() -> None:

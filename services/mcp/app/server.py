@@ -126,17 +126,25 @@ def create_mcp_app(
         *,
         actor_user_id: str,
         action: str,
-        idempotency_key: str | None,
+        idempotency_key: str,
         scoped_payload: dict[str, Any],
         request_id: str,
         fn: Callable[[], Awaitable[dict[str, Any]]],
     ) -> dict[str, Any]:
-        """Execute a write with durable atomic PostgreSQL idempotency when idempotency_key is provided."""
-        if not idempotency_key:
-            data = await fn()
-            return {"ok": True, "idempotent_replay": False, "data": data}
+        """Execute a write with mandatory durable atomic PostgreSQL idempotency.
 
-        key = idempotency_key.strip()
+        Never releases a pending claim after attempting the HTTP write: if the
+        transport fails or returns an ambiguous outcome after FastAPI may have
+        committed, the claim stays pending and an explicit reconciliation error
+        is returned so retries cannot duplicate the write.
+        """
+        key = (idempotency_key or "").strip()
+        if not key:
+            return _format_error(
+                "IDEMPOTENCY_KEY_REQUIRED",
+                f"idempotency_key es obligatorio para la escritura '{action}'.",
+            )
+
         req_hash = canonical_payload_hash(scoped_payload)
         claim = await api_client.claim_idempotency(
             actor_user_id=actor_user_id,
@@ -150,13 +158,19 @@ def create_mcp_app(
 
         try:
             data = await fn()
-        except Exception:
-            await api_client.release_idempotency(
-                actor_user_id=actor_user_id,
-                action=action,
-                idempotency_key=key,
-                request_id=request_id,
+        except httpx.HTTPError as exc:
+            return _format_error(
+                "IDEMPOTENCY_RECONCILIATION_REQUIRED",
+                "Resultado ambiguo tras intentar la escritura HTTP; la clave permanece en estado pending para evitar duplicados. Reconcilia el estado en inventario antes de reintentar con una nueva clave.",
+                details={"idempotency_key": key, "transport_error": str(exc)},
             )
+        except FastAPIError as exc:
+            if exc.status_code >= 500:
+                return _format_error(
+                    "IDEMPOTENCY_RECONCILIATION_REQUIRED",
+                    "Error interno ambiguo tras intentar la escritura HTTP; la clave permanece en estado pending para evitar duplicados.",
+                    details={"idempotency_key": key, "upstream_status": exc.status_code},
+                )
             raise
 
         await api_client.complete_idempotency(
@@ -241,9 +255,9 @@ def create_mcp_app(
         sku: str,
         name: str,
         slug: str,
+        idempotency_key: str,
         approval_proof: str,
         description: str | None = None,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a new product in DRAFT status (requires approval_proof; durable idempotency)."""
         try:
@@ -285,10 +299,10 @@ def create_mcp_app(
         sku: str,
         size: str,
         color: str,
+        idempotency_key: str,
         approval_proof: str,
         color_hex: str | None = None,
         barcode: str | None = None,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a new product variant/size in DRAFT status (requires approval_proof; durable idempotency)."""
         try:
@@ -338,12 +352,12 @@ def create_mcp_app(
         image_base64: str,
         filename: str,
         content_type: str,
+        idempotency_key: str,
         approval_proof: str,
         variant_id: str | None = None,
         alt_text: str | None = None,
         display_order: int = 0,
         is_primary: bool = False,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Upload and attach a product photo via FastAPI Pillow pipeline (requires approval_proof; strips EXIF)."""
         try:
@@ -395,10 +409,10 @@ def create_mcp_app(
     async def set_product_price(
         product_id: str,
         amount_pab: str,
+        idempotency_key: str,
         approval_proof: str,
         compare_at_pab: str | None = None,
         variant_id: str | None = None,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Set current PAB price for a product or variant (requires approval_proof; durable idempotency)."""
         try:
@@ -501,8 +515,8 @@ def create_mcp_app(
     async def set_product_publication_status(
         product_id: str,
         publication_status: Literal["draft", "published", "archived"],
+        idempotency_key: str,
         approval_proof: str,
-        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Publish, draft, or archive a product (requires signed approval_proof; durable idempotency)."""
         try:

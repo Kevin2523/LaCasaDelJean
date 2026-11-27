@@ -166,28 +166,6 @@ class FastAPIClient:
         if resp.status_code != 200:
             raise self._parse_error(resp)
 
-    async def release_idempotency(
-        self,
-        *,
-        actor_user_id: str,
-        action: str,
-        idempotency_key: str,
-        request_id: str | None = None,
-    ) -> None:
-        headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
-        if request_id:
-            headers["X-Request-ID"] = request_id
-        async with self._client() as client:
-            await client.post(
-                "/api/v1/internal/mcp/idempotency/release",
-                json={
-                    "actor_user_id": actor_user_id,
-                    "action": action,
-                    "idempotency_key": idempotency_key,
-                },
-                headers=headers,
-            )
-
     async def _request(
         self,
         method: str,
