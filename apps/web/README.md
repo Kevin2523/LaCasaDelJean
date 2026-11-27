@@ -30,6 +30,12 @@ npm run build   # Build de producción en dist/web/browser
 npm test -- --watch=false --browsers=ChromeHeadless
 ```
 
+## Resolución de imágenes y dependencia con `#9`
+
+- `resolveCatalogImageUrl` resuelve rutas relativas válidas de `storage_path` devueltas por FastAPI (p. ej. `products/lcdj-001/main.webp`) hacia `/media/<path>`, conserva URLs `http(s)://` externas y rechaza rutas inválidas (con `..`, slash inicial o esquemas inseguros) aplicando fallback a fotografías ilustrativas.
+- `nginx.conf` (Docker Compose -> `http://api:8000`) y `proxy.conf.json` (desarrollo -> `http://127.0.0.1:8000`) reenvían `/media/` hacia el backend.
+- **Dependencia con `#9`:** El endpoint `/media` y la carga básica de imágenes en el backend se implementarán en el Issue `#9`; mientras tanto, si `/media/<path>` devuelve `404`, los componentes aplican automáticamente el fallback visual con licencia abierta.
+
 ## Atribución de fotografías ilustrativas
 
 Cuando una prenda o categoría no dispone aún de imagen propia alojada, se utilizan fotografías reales con licencia abierta verificable (Pexels License y Wikimedia Commons CC0 / CC BY-SA), listadas en `src/app/core/utils/media-placeholders.ts` y en el pie de página de la aplicación.

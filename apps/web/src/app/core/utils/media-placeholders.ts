@@ -110,12 +110,40 @@ export function getPlaceholderPhoto(key: string): LicensedPhoto {
   return PLACEHOLDER_PHOTOS[hashKey(normalized) % PLACEHOLDER_PHOTOS.length];
 }
 
+function isSafeRelativeStoragePath(rawPath: string): boolean {
+  if (!rawPath || rawPath.startsWith('/') || rawPath.startsWith('\\')) {
+    return false;
+  }
+  if (rawPath.includes('\\') || rawPath.includes(':')) {
+    return false;
+  }
+  const segments = rawPath.split('/');
+  return segments.every(
+    (segment) =>
+      segment.length > 0 &&
+      segment !== '.' &&
+      segment !== '..' &&
+      !/[\u0000-\u001F\u007F]/.test(segment)
+  );
+}
+
 export function resolveCatalogImageUrl(
   storagePath: string | null | undefined,
   fallbackKey: string
 ): string {
-  if (storagePath && /^https?:\/\//i.test(storagePath)) {
-    return storagePath;
+  const trimmed = storagePath?.trim();
+  if (!trimmed) {
+    return getPlaceholderPhoto(fallbackKey).url;
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (isSafeRelativeStoragePath(trimmed)) {
+    const encodedPath = trimmed
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return `/media/${encodedPath}`;
   }
   return getPlaceholderPhoto(fallbackKey).url;
 }
