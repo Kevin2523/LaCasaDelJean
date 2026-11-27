@@ -75,6 +75,44 @@ class StockMovementResult:
     idempotent_replay: bool
 
 
+def _resolve_idempotent_replay(
+    session: Session,
+    command: StockMovementCommand,
+    balance: StockBalance | None = None,
+) -> StockMovementResult | None:
+    """Return an idempotent replay result if idempotency_key already exists."""
+    if not command.idempotency_key:
+        return None
+
+    existing = session.scalar(
+        select(StockMovement).where(StockMovement.idempotency_key == command.idempotency_key)
+    )
+    if existing is None:
+        return None
+
+    if (
+        existing.variant_id != command.variant_id
+        or existing.direction != command.direction.value
+        or existing.quantity != command.quantity
+    ):
+        raise IdempotencyConflictError(
+            f"Idempotency key '{command.idempotency_key}' was already used with different parameters."
+        )
+
+    resolved_balance = balance or session.scalar(
+        select(StockBalance).where(StockBalance.variant_id == command.variant_id)
+    )
+    if resolved_balance is None:
+        raise StockBalanceNotFoundError(
+            f"StockBalance not found for variant {command.variant_id}."
+        )
+    return StockMovementResult(
+        movement=existing,
+        balance=resolved_balance,
+        idempotent_replay=True,
+    )
+
+
 def apply_stock_movement(session: Session, command: StockMovementCommand) -> StockMovementResult:
     """Apply a stock movement atomically using SELECT ... FOR UPDATE.
 
@@ -89,31 +127,10 @@ def apply_stock_movement(session: Session, command: StockMovementCommand) -> Sto
             "idempotency_key is required for outbound stock movements."
         )
 
-    if command.idempotency_key:
-        existing = session.scalar(
-            select(StockMovement).where(StockMovement.idempotency_key == command.idempotency_key)
-        )
-        if existing is not None:
-            if (
-                existing.variant_id != command.variant_id
-                or existing.direction != command.direction.value
-                or existing.quantity != command.quantity
-            ):
-                raise IdempotencyConflictError(
-                    f"Idempotency key '{command.idempotency_key}' was already used with different parameters."
-                )
-            balance = session.scalar(
-                select(StockBalance).where(StockBalance.variant_id == command.variant_id)
-            )
-            if balance is None:
-                raise StockBalanceNotFoundError(
-                    f"StockBalance not found for variant {command.variant_id}."
-                )
-            return StockMovementResult(
-                movement=existing,
-                balance=balance,
-                idempotent_replay=True,
-            )
+    # Fast-path check before acquiring row lock
+    replay = _resolve_idempotent_replay(session, command)
+    if replay is not None:
+        return replay
 
     balance = session.scalar(
         select(StockBalance)
@@ -124,6 +141,12 @@ def apply_stock_movement(session: Session, command: StockMovementCommand) -> Sto
         raise StockBalanceNotFoundError(
             f"StockBalance not found for variant {command.variant_id}."
         )
+
+    # Re-check after acquiring FOR UPDATE so concurrent callers with the same
+    # idempotency_key observe the committed movement and return a clean replay.
+    replay = _resolve_idempotent_replay(session, command, balance=balance)
+    if replay is not None:
+        return replay
 
     quantity_before = balance.quantity
     if command.direction == StockDirection.OUT:

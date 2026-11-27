@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.seed import seed_development_data
+from app.db.seed import main as seed_main, seed_development_data
+from app.db.session import build_session_factory
 from app.models import (
     AuditEvent,
     Category,
@@ -321,3 +323,128 @@ def test_dev_seed_is_idempotent(db_session: Session) -> None:
     second = seed_development_data(db_session)
     db_session.commit()
     assert second == {"roles": 0, "users": 0, "categories": 0, "products": 0, "variants": 0}
+
+
+def test_dev_seed_main_rejects_non_dev_app_env(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Verify seed CLI refuses to run when APP_ENV is not development/test."""
+    monkeypatch.setenv("APP_ENV", "production")
+    with pytest.raises(RuntimeError, match="forbidden"):
+        seed_main()
+
+    # Confirm no placeholder user was inserted
+    assert db_session.scalar(select(User)) is None
+
+
+def test_concurrent_outbound_same_idempotency_key_returns_replay(
+    migrated_db: Engine,
+) -> None:
+    """Verify two concurrent PostgreSQL sessions with the same idempotency_key do not hit IntegrityError."""
+    session_factory = build_session_factory(migrated_db)
+
+    with session_factory() as setup_session:
+        with setup_session.begin():
+            user, _, variant, _ = _create_base_variant(setup_session)
+            apply_stock_movement(
+                setup_session,
+                StockMovementCommand(
+                    variant_id=variant.id,
+                    direction=StockDirection.IN,
+                    movement_type=StockMovementType.INITIAL_LOAD,
+                    quantity=10,
+                    idempotency_key="concurrent-init-001",
+                    performed_by=user.id,
+                ),
+            )
+            variant_id = variant.id
+            user_id = user.id
+
+    lock_acquired = threading.Event()
+    release_first = threading.Event()
+    results: dict[str, tuple[str, bool, int]] = {}
+    errors: list[BaseException] = []
+
+    def worker_first() -> None:
+        try:
+            with session_factory() as s1:
+                with s1.begin():
+                    res = apply_stock_movement(
+                        s1,
+                        StockMovementCommand(
+                            variant_id=variant_id,
+                            direction=StockDirection.OUT,
+                            movement_type=StockMovementType.SALE,
+                            quantity=3,
+                            idempotency_key="concurrent-sale-001",
+                            performed_by=user_id,
+                        ),
+                    )
+                    # Hold the FOR UPDATE row lock until worker_second has started
+                    # and passed its pre-lock check.
+                    lock_acquired.set()
+                    assert release_first.wait(timeout=5.0)
+                    results["first"] = (
+                        str(res.movement.id),
+                        res.idempotent_replay,
+                        res.balance.quantity,
+                    )
+        except BaseException as exc:  # pragma: no cover
+            errors.append(exc)
+
+    def worker_second() -> None:
+        try:
+            assert lock_acquired.wait(timeout=5.0)
+            with session_factory() as s2:
+                with s2.begin():
+                    # Release worker_first shortly after worker_second starts waiting on FOR UPDATE
+                    timer = threading.Timer(0.25, release_first.set)
+                    timer.start()
+                    try:
+                        res = apply_stock_movement(
+                            s2,
+                            StockMovementCommand(
+                                variant_id=variant_id,
+                                direction=StockDirection.OUT,
+                                movement_type=StockMovementType.SALE,
+                                quantity=3,
+                                idempotency_key="concurrent-sale-001",
+                                performed_by=user_id,
+                            ),
+                        )
+                    finally:
+                        timer.cancel()
+                        release_first.set()
+                    results["second"] = (
+                        str(res.movement.id),
+                        res.idempotent_replay,
+                        res.balance.quantity,
+                    )
+        except BaseException as exc:  # pragma: no cover
+            release_first.set()
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker_first)
+    t2 = threading.Thread(target=worker_second)
+    t1.start()
+    t2.start()
+    t1.join(timeout=10.0)
+    t2.join(timeout=10.0)
+
+    assert not errors, f"Unexpected concurrent errors: {errors}"
+    assert results["first"][1] is False
+    assert results["second"][1] is True
+    assert results["first"][0] == results["second"][0]
+    assert results["first"][2] == 7
+    assert results["second"][2] == 7
+
+    with session_factory() as verify_session:
+        balance = verify_session.scalar(
+            select(StockBalance).where(StockBalance.variant_id == variant_id)
+        )
+        assert balance is not None
+        assert balance.quantity == 7
+        movements = verify_session.scalars(
+            select(StockMovement).where(StockMovement.variant_id == variant_id)
+        ).all()
+        assert len(movements) == 2

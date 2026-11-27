@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.base import utcnow
 from app.db.session import build_engine, build_session_factory
 from app.models import (
@@ -27,6 +29,19 @@ from app.models import (
 from app.services.stock import StockMovementCommand, apply_stock_movement
 
 DEV_PLACEHOLDER_HASH = "dev-only-not-for-production-hash"
+ALLOWED_SEED_ENVS = frozenset({"development", "test"})
+
+
+def ensure_seed_allowed(app_env: str | None = None) -> str:
+    """Reject development seed execution outside development/test environments."""
+    resolved = (app_env if app_env is not None else os.getenv("APP_ENV") or get_settings().app_env)
+    normalized = resolved.strip().lower()
+    if normalized not in ALLOWED_SEED_ENVS:
+        raise RuntimeError(
+            f"Development seed is forbidden when APP_ENV='{resolved}'. "
+            f"Allowed values: {sorted(ALLOWED_SEED_ENVS)}."
+        )
+    return normalized
 
 
 def seed_development_data(session: Session) -> dict[str, int]:
@@ -178,6 +193,7 @@ def seed_development_data(session: Session) -> dict[str, int]:
 
 def main() -> None:
     """CLI entrypoint for development seeding."""
+    ensure_seed_allowed()
     engine = build_engine()
     session_factory = build_session_factory(engine)
     with session_factory() as session:
