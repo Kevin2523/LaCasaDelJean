@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.error_handlers import register_exception_handlers
@@ -68,6 +70,10 @@ def create_app(
     application.include_router(catalog_admin_router)
     application.include_router(audit_admin_router)
     application.include_router(inventory_router)
+
+    media_dir = Path(resolved_settings.media_root)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    application.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
 
     return application
 

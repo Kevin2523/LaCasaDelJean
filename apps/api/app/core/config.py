@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     database_url: str = "postgresql+psycopg://lacasadeljean:lacasadeljean@localhost:5432/lacasadeljean_v2"
+    media_root: str = "storage/media"
     cors_origins: str = "http://127.0.0.1:4200,http://localhost:4200"
     jwt_secret_key: str = "dev-only-insecure-jwt-secret-change-me-before-production"
     jwt_algorithm: str = "HS256"
