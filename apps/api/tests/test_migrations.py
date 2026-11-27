@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "stock_balances",
     "stock_movements",
     "audit_events",
+    "mcp_consumed_nonces",
+    "mcp_idempotency_records",
 }
 
 

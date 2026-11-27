@@ -1,14 +1,14 @@
-"""Cryptographic verification, anti-replay nonces, idempotency cache, and test signers."""
+"""Cryptographic verification helpers and test signers (stateless; durability lives in FastAPI/PG)."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
-import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 import jwt
@@ -34,61 +34,15 @@ class VerifiedActor:
 
     telegram_user_id: int
     jti: str
+    expires_at: datetime
 
 
-class NonceStore:
-    """Thread-safe bounded TTL store for one-use JTI anti-replay enforcement."""
+@dataclass(frozen=True, slots=True)
+class VerifiedApproval:
+    """Verified approval proof metadata ready for durable one-use consumption."""
 
-    def __init__(self, max_entries: int = 10_000) -> None:
-        self._lock = threading.Lock()
-        self._entries: dict[str, float] = {}
-        self._max_entries = max_entries
-
-    def consume(self, jti: str, expires_at: float) -> bool:
-        """Consume a nonce; returns False if already used (replay)."""
-        now = time.time()
-        with self._lock:
-            if len(self._entries) >= self._max_entries:
-                expired = [k for k, exp in self._entries.items() if exp <= now]
-                for k in expired:
-                    del self._entries[k]
-            if jti in self._entries and self._entries[jti] > now:
-                return False
-            self._entries[jti] = max(expires_at, now + 60.0)
-            return True
-
-
-class IdempotencyStore:
-    """Thread-safe bounded TTL store for idempotent MCP catalog draft creations."""
-
-    def __init__(self, ttl_seconds: int = 3600, max_entries: int = 5_000) -> None:
-        self._lock = threading.Lock()
-        self._ttl_seconds = ttl_seconds
-        self._max_entries = max_entries
-        self._entries: dict[tuple[int, str, str], tuple[float, dict[str, Any]]] = {}
-
-    def get(self, telegram_user_id: int, action: str, key: str) -> dict[str, Any] | None:
-        now = time.time()
-        composite = (telegram_user_id, action, key)
-        with self._lock:
-            item = self._entries.get(composite)
-            if item is None:
-                return None
-            exp, payload = item
-            if exp <= now:
-                del self._entries[composite]
-                return None
-            return dict(payload)
-
-    def put(self, telegram_user_id: int, action: str, key: str, payload: dict[str, Any]) -> None:
-        now = time.time()
-        composite = (telegram_user_id, action, key)
-        with self._lock:
-            if len(self._entries) >= self._max_entries:
-                expired = [k for k, (exp, _) in self._entries.items() if exp <= now]
-                for k in expired:
-                    del self._entries[k]
-            self._entries[composite] = (now + self._ttl_seconds, dict(payload))
+    jti: str
+    expires_at: datetime
 
 
 def _require_configured_secret(secret: str, name: str) -> str:
@@ -121,9 +75,8 @@ def verify_actor_assertion(
     *,
     secret: str,
     max_ttl_seconds: int,
-    nonce_store: NonceStore,
 ) -> VerifiedActor:
-    """Verify signed X-Actor-Assertion JWT with anti-replay JTI enforcement."""
+    """Verify signed X-Actor-Assertion JWT structure, signature, claims, and TTL."""
     key = _require_configured_secret(secret, "MCP_ACTOR_ASSERTION_SECRET")
     if not token or not token.strip():
         raise SecurityError("UNAUTHENTICATED_ACTOR", "Falta cabecera X-Actor-Assertion.", status_code=401)
@@ -156,10 +109,11 @@ def verify_actor_assertion(
     if not jti:
         raise SecurityError("INVALID_ACTOR_JTI", "jti vacío en X-Actor-Assertion.", status_code=401)
 
-    if not nonce_store.consume(f"actor:{jti}", float(exp)):
-        raise SecurityError("REPLAYED_ACTOR_ASSERTION", "Aserción de actor ya utilizada (replay denegado).", status_code=401)
-
-    return VerifiedActor(telegram_user_id=raw_tg_id, jti=jti)
+    return VerifiedActor(
+        telegram_user_id=raw_tg_id,
+        jti=jti,
+        expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
+    )
 
 
 def verify_approval_proof(
@@ -170,14 +124,13 @@ def verify_approval_proof(
     expected_action: str,
     expected_payload: dict[str, Any],
     max_ttl_seconds: int,
-    nonce_store: NonceStore,
-) -> dict[str, Any]:
-    """Verify signed, scoped, short-lived, one-use approval_proof for sensitive writes."""
+) -> VerifiedApproval:
+    """Verify signed, scoped, short-lived approval_proof (one-use enforced durably in FastAPI/PG)."""
     key = _require_configured_secret(secret, "MCP_APPROVAL_SIGNING_SECRET")
     if not proof or not proof.strip():
         raise SecurityError(
             "APPROVAL_REQUIRED",
-            f"La acción sensible '{expected_action}' requiere approval_proof firmado.",
+            f"La acción de escritura '{expected_action}' requiere approval_proof firmado.",
             status_code=403,
         )
 
@@ -220,10 +173,13 @@ def verify_approval_proof(
         raise SecurityError("APPROVAL_SCOPE_MISMATCH", "approval_proof no coincide con los parámetros exactos de la operación.", status_code=403)
 
     jti = str(claims["jti"]).strip()
-    if not jti or not nonce_store.consume(f"approval:{jti}", float(exp)):
-        raise SecurityError("APPROVAL_REPLAYED", "approval_proof ya fue utilizado (un solo uso).", status_code=403)
+    if not jti:
+        raise SecurityError("INVALID_APPROVAL_PROOF", "jti vacío en approval_proof.", status_code=403)
 
-    return claims
+    return VerifiedApproval(
+        jti=jti,
+        expires_at=datetime.fromtimestamp(exp, tz=timezone.utc),
+    )
 
 
 # ---------------------------------------------------------------------------

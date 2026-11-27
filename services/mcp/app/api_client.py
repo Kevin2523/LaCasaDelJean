@@ -65,6 +65,8 @@ class FastAPIClient:
         self,
         telegram_user_id: int,
         *,
+        actor_jti: str,
+        actor_expires_at: str,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
@@ -73,12 +75,118 @@ class FastAPIClient:
         async with self._client() as client:
             resp = await client.post(
                 "/api/v1/internal/mcp/exchange",
-                json={"telegram_user_id": telegram_user_id},
+                json={
+                    "telegram_user_id": telegram_user_id,
+                    "actor_jti": actor_jti,
+                    "actor_expires_at": actor_expires_at,
+                },
                 headers=headers,
             )
         if resp.status_code != 200:
             raise self._parse_error(resp)
         return resp.json()
+
+    async def consume_approval_nonce(
+        self,
+        *,
+        jti: str,
+        telegram_user_id: int,
+        expires_at: str,
+        request_id: str | None = None,
+    ) -> None:
+        headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        async with self._client() as client:
+            resp = await client.post(
+                "/api/v1/internal/mcp/nonces/consume",
+                json={
+                    "scope": "approval",
+                    "jti": jti,
+                    "telegram_user_id": telegram_user_id,
+                    "expires_at": expires_at,
+                },
+                headers=headers,
+            )
+        if resp.status_code != 200:
+            raise self._parse_error(resp)
+
+    async def claim_idempotency(
+        self,
+        *,
+        actor_user_id: str,
+        action: str,
+        idempotency_key: str,
+        request_hash: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        async with self._client() as client:
+            resp = await client.post(
+                "/api/v1/internal/mcp/idempotency/claim",
+                json={
+                    "actor_user_id": actor_user_id,
+                    "action": action,
+                    "idempotency_key": idempotency_key,
+                    "request_hash": request_hash,
+                },
+                headers=headers,
+            )
+        if resp.status_code != 200:
+            raise self._parse_error(resp)
+        return resp.json()
+
+    async def complete_idempotency(
+        self,
+        *,
+        actor_user_id: str,
+        action: str,
+        idempotency_key: str,
+        response_status: int,
+        response_body: dict[str, Any],
+        request_id: str | None = None,
+    ) -> None:
+        headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        async with self._client() as client:
+            resp = await client.post(
+                "/api/v1/internal/mcp/idempotency/complete",
+                json={
+                    "actor_user_id": actor_user_id,
+                    "action": action,
+                    "idempotency_key": idempotency_key,
+                    "response_status": response_status,
+                    "response_body": response_body,
+                },
+                headers=headers,
+            )
+        if resp.status_code != 200:
+            raise self._parse_error(resp)
+
+    async def release_idempotency(
+        self,
+        *,
+        actor_user_id: str,
+        action: str,
+        idempotency_key: str,
+        request_id: str | None = None,
+    ) -> None:
+        headers = {"X-Internal-MCP-Token": self._settings.hermes_mcp_shared_secret}
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        async with self._client() as client:
+            await client.post(
+                "/api/v1/internal/mcp/idempotency/release",
+                json={
+                    "actor_user_id": actor_user_id,
+                    "action": action,
+                    "idempotency_key": idempotency_key,
+                },
+                headers=headers,
+            )
 
     async def _request(
         self,

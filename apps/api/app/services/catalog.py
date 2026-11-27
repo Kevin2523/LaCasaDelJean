@@ -1130,16 +1130,27 @@ def upload_product_image(
         with PilImage.open(io.BytesIO(content)) as img:
             width, height = img.size
             pil_format = (img.format or "").upper()
+            format_to_mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+            detected_mime = format_to_mime.get(pil_format)
+            if detected_mime is None:
+                raise DomainValidationError("Formato binario de imagen no permitido (solo JPEG, PNG o WebP).")
+            out_buf = io.BytesIO()
+            if pil_format == "JPEG":
+                img.convert("RGB").save(out_buf, format="JPEG", quality=90, optimize=True)
+            elif pil_format == "PNG":
+                mode = "RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB"
+                img.convert(mode).save(out_buf, format="PNG", optimize=True)
+            else:
+                mode = "RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB"
+                img.convert(mode).save(out_buf, format="WEBP", quality=90)
+            sanitized_content = out_buf.getvalue()
+    except DomainValidationError:
+        raise
     except (UnidentifiedImageError, OSError) as exc:
         raise DomainValidationError("El archivo cargado no es una imagen válida.") from exc
 
-    format_to_mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
-    detected_mime = format_to_mime.get(pil_format)
-    if detected_mime is None:
-        raise DomainValidationError("Formato binario de imagen no permitido (solo JPEG, PNG o WebP).")
-
     ext = ALLOWED_UPLOAD_MIME_TYPES[detected_mime]
-    sha256 = hashlib.sha256(content).hexdigest()
+    sha256 = hashlib.sha256(sanitized_content).hexdigest()
     safe_name = f"{uuid.uuid4().hex}{ext}"
     relative_path = f"products/{product_id}/{safe_name}"
 
@@ -1149,7 +1160,7 @@ def upload_product_image(
         raise DomainValidationError("Ruta de almacenamiento inválida.")
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_bytes(content)
+    target_path.write_bytes(sanitized_content)
 
     safe_original = Path(original_filename or safe_name).name[:255] or safe_name
     payload = ImageCreate(
@@ -1157,7 +1168,7 @@ def upload_product_image(
         storage_path=relative_path,
         original_filename=safe_original,
         mime_type=detected_mime,
-        size_bytes=len(content),
+        size_bytes=len(sanitized_content),
         width=width,
         height=height,
         sha256=sha256,

@@ -37,14 +37,19 @@ Toda invocación de herramienta MCP (`tools/call`) debe incluir el header HTTP `
 **Política fail-closed:**
 - Aserción ausente, malformada, con firma inválida, expirada, con TTL > 60s o `jti` repetido → denegada inmediatamente (`401`/`403`).
 
-### 2.3 Mapeo a Usuario Activo y RBAC en FastAPI
+### 2.3 Mapeo a Usuario Activo, Deduplicación Duradera y RBAC en FastAPI
 - Modelo `users` en PostgreSQL añade columna `telegram_user_id BIGINT UNIQUE NULL` (migración `20261127_0004_add_user_telegram_id.py`).
-- Endpoint interno en `apps/api`: `POST /api/v1/internal/mcp/exchange`
-  - Protegido por header `X-Internal-MCP-Token: <HERMES_MCP_SHARED_SECRET>` (fail-closed si no está configurado).
-  - Request: `{"telegram_user_id": 123456789}`
-  - Comportamiento: busca un `User` con `telegram_user_id` coincidente y `is_active = True`. Si no existe o está inactivo, responde `403 Forbidden`.
-  - Response `200 OK`: `{ "access_token": "<jwt>", "token_type": "bearer", "expires_at": "...", "user": { "id", "email", "full_name", "role", "is_active" } }` respaldado por una `AuthSession` de corta duración (`5 min`) con `user_agent="mcp-inventory-service"`.
-- `services/mcp` usa ese Bearer JWT en todas las llamadas posteriores a `/api/v1/admin/*` y `/api/v1/inventory/*`, preservando RBAC (`admin`, `operator`, `viewer`) y `actor_user_id` en `audit_events`.
+- Tablas duraderas en PostgreSQL (migración `20261127_0005_add_mcp_replay_and_idempotency.py`):
+  - `mcp_consumed_nonces` con `UNIQUE (scope, jti)` para anti-replay atómico de `X-Actor-Assertion` (`scope="actor"`) y `approval_proof` (`scope="approval"`) entre reinicios y réplicas.
+  - `mcp_idempotency_records` con `UNIQUE (actor_user_id, action, idempotency_key)` para deduplicación atómica y duradera de escrituras MCP.
+- Endpoints internos en `apps/api` (protegidos por `X-Internal-MCP-Token: <HERMES_MCP_SHARED_SECRET>`, fail-closed si no está configurado):
+  - `POST /api/v1/internal/mcp/exchange`: consume atómicamente `actor_jti` en PostgreSQL, verifica `User` activo con `telegram_user_id` coincidente y emite un Bearer JWT de corta duración (`5 min`) respaldado por `AuthSession` y auditado (`mcp_exchange`).
+  - `POST /api/v1/internal/mcp/nonces/consume`: consume atómicamente `approval_proof.jti` en PostgreSQL (un solo uso duradero).
+  - `POST /api/v1/internal/mcp/idempotency/{claim,complete,release}`: reserva, persiste o libera claves de idempotencia de forma atómica en PostgreSQL.
+- `services/mcp` es completamente stateless (sin estado crítico en memoria y sin acceso a PostgreSQL) y usa el Bearer JWT emitido por FastAPI en todas las llamadas a `/api/v1/admin/*` y `/api/v1/inventory/*`.
+
+### 2.4 Dependencia con #11 / #12 (Puente Confiable por Llamada en Hermes)
+> **Nota de integración (#11 / #12):** La configuración nativa de servidores MCP en Hermes únicamente admite cabeceras HTTP estáticas o por perfil, no cabeceras dinámicas por usuario de Telegram en cada llamada. Por ello, este PR (#10) no afirma integración final directa con Hermes; #11/#12 deberá incorporar un puente confiable por llamada encargado de inyectar `X-Actor-Assertion` (identidad verificada de Telegram) y `approval_proof` (confirmación explícita firmada) en cada invocación hacia `services/mcp`.
 
 ---
 
@@ -54,17 +59,19 @@ Las escrituras sensibles requieren una prueba criptográfica firmada, acotada al
 
 ### 3.1 Clasificación de Herramientas
 
+**Toda escritura MCP exige `approval_proof` firmado, acotado y de un solo uso duradero**, alineado con #12 (confirmación explícita por cada cambio). Las herramientas de lectura no requieren prueba y no pueden mutar estado.
+
 | Herramienta | Tipo | RBAC mínimo | Requiere `approval_proof` |
 | --- | --- | --- | --- |
 | `search_products` | Lectura | `viewer` | No (solo lectura, no muta) |
 | `get_product_detail` | Lectura | `viewer` | No (solo lectura, no muta) |
 | `get_variant_stock` | Lectura | `viewer` | No (solo lectura, no muta) |
-| `create_product_draft` | Escritura borrador | `operator` | No (siempre crea en `draft`) |
-| `create_variant` | Escritura borrador | `operator` | No (siempre crea en `draft`) |
-| `attach_product_photo` | Escritura media | `operator` | No (validado por Pillow en API) |
-| `set_product_price` | **Escritura sensible** | `operator` | **Sí** |
-| `record_stock_movement` | **Escritura sensible** | `operator` | **Sí** |
-| `set_product_publication_status` | **Escritura sensible** | `operator` | **Sí** |
+| `create_product_draft` | **Escritura** | `operator` | **Sí** (siempre crea en `draft`) |
+| `create_variant` | **Escritura** | `operator` | **Sí** (siempre crea en `draft`) |
+| `attach_product_photo` | **Escritura** | `operator` | **Sí** (re-codifica con Pillow y elimina EXIF en API) |
+| `set_product_price` | **Escritura** | `operator` | **Sí** |
+| `record_stock_movement` | **Escritura** | `operator` | **Sí** |
+| `set_product_publication_status` | **Escritura** | `operator` | **Sí** |
 
 ### 3.2 Claims de `approval_proof`
 
