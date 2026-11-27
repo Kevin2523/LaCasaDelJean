@@ -37,15 +37,16 @@ Abrir en el navegador: `http://localhost:4173` (o abrir directamente `docs/proto
 
 ## 3. Atribución de Fotografías (Marcadores de Posición Ilustrativos)
 
-> **Aviso importante:** No se utilizaron las capturas de referencia como imágenes del sitio ni imágenes generadas por IA. Todas las fotografías son reales con licencia abierta verificable en Wikimedia Commons y funcionan como marcadores de posición ilustrativos.
+> **Aviso importante:** No se utilizaron las capturas de referencia como imágenes del sitio ni imágenes generadas por IA. Todas las fotografías son reales con licencia abierta verificable (Pexels License `https://www.pexels.com/license/` y Wikimedia Commons) y funcionan como marcadores de posición ilustrativos sin implicar aval de la tienda.
 
-| Uso en prototipo | Autor | Licencia | Fuente verificable |
+| Uso en prototipo | Origen / Autor | Licencia | Fuente verificable |
 | --- | --- | --- | --- |
 | Hero campaña denim a color | Jcjeansandclothes | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Jeans_Jeans_Jeans.jpg |
-| Colección Denim (panel lateral) | El Nuevo Doge | CC0 | https://commons.wikimedia.org/wiki/File:Jeans_mexicanos.jpg |
-| Jean Clásico Índigo / Cat. Jeans | Leo-setä | CC BY 2.0 | https://commons.wikimedia.org/wiki/File:%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_(3953687892).jpg |
-| Jean Tiro Alto Slim | Imani Bahati | CC0 | https://commons.wikimedia.org/wiki/File:Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg |
+| Jean Clásico Índigo / Cat. Jeans | Pexels (#6764017) | Pexels License | https://www.pexels.com/photo/man-in-jean-jacket-and-pants-on-white-backg-6764017/ |
+| Jean Tiro Alto Slim | Pexels (#37076315) | Pexels License | https://www.pexels.com/photo/stylish-model-posing-in-casual-denim-and-white-tee-37076315/ |
 | Chaqueta Denim Tradicional | NikosLikomitros | CC0 | https://commons.wikimedia.org/wiki/File:Jean_jacket.jpg |
+| Categoría Damas | Pexels (#9713293) | Pexels License | https://www.pexels.com/photo/a-woman-wearing-crop-top-and-denim-jeans-9713293/ |
+| Colección Denim (panel lateral) | El Nuevo Doge | CC0 | https://commons.wikimedia.org/wiki/File:Jeans_mexicanos.jpg |
 | Camisa Denim / Cat. Caballeros | May Lee | CC BY-SA 2.0 | https://commons.wikimedia.org/wiki/File:Man_wearing_blue_denim_shirt_with_rolled_sleeves,_tan_chinos_1.jpg |
 | Pantalón Chino Algodón Arena | Kuha455405 | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Chino_pants.jpg |
 | Conjunto Familiar / Cat. Niños | DimiTalen | CC0 | https://commons.wikimedia.org/wiki/File:Man_in_marini%C3%A8re_with_child.jpg |

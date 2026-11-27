@@ -249,7 +249,7 @@
           </div>
         </div>
         <p style="font-size:0.75rem;color:var(--ink-muted);margin:8px 0 0;">
-          Foto ilustrativa: ${product.attribution.author} (${product.attribution.license}) · Wikimedia Commons
+          Foto ilustrativa: ${product.attribution.author} (${product.attribution.license})
         </p>
       </div>
       <div>

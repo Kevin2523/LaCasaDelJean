@@ -38,17 +38,17 @@ window.LCDJ_DATA = {
     {
       id: "jeans",
       label: "Jeans",
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/48/%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg/960px-%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      image: "https://images.pexels.com/photos/6764017/pexels-photo-6764017.jpeg?auto=compress&cs=tinysrgb&w=900"
     },
     {
       id: "damas",
       label: "Damas",
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/27/Denim_jacket_details.jpg/960px-Denim_jacket_details.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      image: "https://images.pexels.com/photos/9713293/pexels-photo-9713293.jpeg?auto=compress&cs=tinysrgb&w=900"
     },
     {
       id: "caballeros",
       label: "Caballeros",
-      image: "https://upload.wikimedia.org/wikipedia/commons/e/ec/Man_wearing_blue_denim_shirt_with_rolled_sleeves%2C_tan_chinos_1.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+      image: "https://images.pexels.com/photos/6764017/pexels-photo-6764017.jpeg?auto=compress&cs=tinysrgb&w=900"
     },
     {
       id: "ninos",
@@ -86,11 +86,11 @@ window.LCDJ_DATA = {
       color: "Índigo",
       colorId: "indigo",
       swatches: ["#1B365D", "#4D739B", "#1F2937"],
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/48/%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg/960px-%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_%283953687892%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      image: "https://images.pexels.com/photos/6764017/pexels-photo-6764017.jpeg?auto=compress&cs=tinysrgb&w=900",
       attribution: {
-        author: "Leo-setä",
-        license: "CC BY 2.0",
-        source: "https://commons.wikimedia.org/wiki/File:%E3%83%86%E3%83%BC%E3%83%91%E3%83%BC%E3%83%89%E3%82%B8%E3%83%BC%E3%83%B3%E3%82%BA_(3953687892).jpg"
+        author: "Pexels (foto #6764017)",
+        license: "Pexels License",
+        source: "https://www.pexels.com/photo/man-in-jean-jacket-and-pants-on-white-backg-6764017/"
       },
       sizes: [
         { size: "28", stock: 6 },
@@ -116,11 +116,11 @@ window.LCDJ_DATA = {
       color: "Azul Medio",
       colorId: "azul-medio",
       swatches: ["#4D739B", "#1B365D"],
-      image: "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a9/Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg/960px-Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      image: "https://images.pexels.com/photos/37076315/pexels-photo-37076315.jpeg?auto=compress&cs=tinysrgb&w=900",
       attribution: {
-        author: "Imani Bahati",
-        license: "CC0",
-        source: "https://commons.wikimedia.org/wiki/File:Imani-bahati-woman-wearing-distressed-blue-denim-jeans-sitting-on-floor.jpg"
+        author: "Pexels (foto #37076315)",
+        license: "Pexels License",
+        source: "https://www.pexels.com/photo/stylish-model-posing-in-casual-denim-and-white-tee-37076315/"
       },
       sizes: [
         { size: "6", stock: 5 },
