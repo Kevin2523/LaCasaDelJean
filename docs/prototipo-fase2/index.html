@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>La Casa del Jean — Prototipo Visual Fase 2 (Etapa A)</title>
+  <link rel="icon" href="data:," />
+  <meta name="description" content="Propuesta visual navegable (Etapa A) para el catálogo público, carrito de consultas y panel administrativo de La Casa del Jean." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Saltar al contenido principal</a>
+
+  <div class="proto-banner" role="note">
+    <strong>Prototipo Visual — Etapa A (Fase 2)</strong> · Datos simulados (sin API ni base de datos) · Fotografías ilustrativas con licencia abierta
+  </div>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#inicio" class="wordmark" data-nav="inicio" aria-label="La Casa del Jean — Inicio">
+        La Casa del Jean
+        <span>Panamá · Catálogo</span>
+      </a>
+
+      <nav class="desktop-nav" aria-label="Navegación principal">
+        <button type="button" class="nav-link" data-nav="inicio">Inicio</button>
+        <button type="button" class="nav-link" data-nav="catalogo">Catálogo</button>
+        <button type="button" class="nav-link" data-nav="carrito">Consulta</button>
+        <button type="button" class="nav-link" data-nav="admin-login">Admin</button>
+      </nav>
+
+      <div class="header-actions">
+        <button type="button" class="icon-btn" data-nav="carrito" aria-label="Ver carrito de consultas">
+          <span>Consulta</span>
+          <span class="cart-badge" id="header-cart-count">0</span>
+        </button>
+        <button type="button" class="icon-btn menu-toggle" id="mobile-menu-btn" aria-expanded="false" aria-controls="mobile-nav">
+          Menú
+        </button>
+      </div>
+    </div>
+
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Menú móvil">
+      <div class="mobile-nav-list">
+        <button type="button" class="nav-link" data-nav="inicio">Inicio</button>
+        <button type="button" class="nav-link" data-nav="catalogo">Catálogo y filtros</button>
+        <button type="button" class="nav-link" data-nav="carrito">Carrito de consultas</button>
+        <button type="button" class="nav-link" data-nav="admin-login">Acceso administrativo</button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <!-- 1. INICIO -->
+    <section id="view-inicio" class="view-section is-active" aria-labelledby="hero-heading">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">Colección Familiar · Panamá</p>
+          <h1 id="hero-heading">Denim esencial y básicos cómodos para cada día.</h1>
+          <p>
+            Explora nuestras prendas por categoría y talla, arma tu lista de consulta y verifica disponibilidad directamente con nuestra tienda en Panamá.
+          </p>
+          <div class="hero-actions">
+            <button type="button" class="btn btn-primary" data-nav="catalogo">Explorar catálogo</button>
+            <button type="button" class="btn btn-secondary" data-nav="carrito">Ver lista de consulta</button>
+          </div>
+        </div>
+        <div>
+          <div class="hero-media">
+            <img id="hero-img" src="" alt="" />
+          </div>
+          <p class="photo-caption" id="hero-caption"></p>
+        </div>
+      </div>
+
+      <div class="trust-strip" aria-label="Información de la tienda">
+        <div class="trust-item">
+          <h2>Tallas para toda la familia</h2>
+          <p>Damas, caballeros, niños y básicos denim seleccionados para el clima local.</p>
+        </div>
+        <div class="trust-item">
+          <h2>Consulta directa sin pagos en línea</h2>
+          <p>Selecciona tus prendas y tallas; atención por WhatsApp al +507 6522-6428.</p>
+        </div>
+        <div class="trust-item">
+          <h2>Disponibilidad transparente</h2>
+          <p>Visualiza tallas disponibles y stock actualizado desde nuestro panel interno.</p>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h2>Explorar por categoría</h2>
+        <button type="button" class="btn btn-ghost btn-sm" data-nav="catalogo">Ver todo el catálogo →</button>
+      </div>
+      <div class="chip-row" id="home-category-chips"></div>
+
+      <div class="section-head">
+        <h2>Destacados de la semana</h2>
+      </div>
+      <div class="product-grid" id="home-featured-grid"></div>
+    </section>
+
+    <!-- 2. CATÁLOGO / BÚSQUEDA / FILTROS -->
+    <section id="view-catalogo" class="view-section" aria-labelledby="catalog-heading">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Catálogo Público · Issue #7</p>
+          <h1 id="catalog-heading" style="margin:0;font-size:1.75rem;">Todas las prendas</h1>
+        </div>
+      </div>
+
+      <div class="filter-bar" role="search" aria-label="Filtrar catálogo">
+        <div class="field">
+          <label for="search-input">Buscar por nombre, SKU o color</label>
+          <input id="search-input" class="input" type="search" placeholder="Ej. Jean recto, chaqueta, índigo..." />
+        </div>
+        <div class="field">
+          <label for="category-select">Categoría</label>
+          <select id="category-select" class="select"></select>
+        </div>
+        <div class="field">
+          <label for="size-select">Talla disponible</label>
+          <select id="size-select" class="select">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="sort-select">Ordenar por</label>
+          <select id="sort-select" class="select">
+            <option value="featured">Destacados</option>
+            <option value="price-asc">Precio: menor a mayor</option>
+            <option value="price-desc">Precio: mayor a menor</option>
+            <option value="name-asc">Nombre A–Z</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="results-summary">
+        <span id="catalog-count">Mostrando 0 prendas</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="clear-filters-btn">Limpiar filtros</button>
+      </div>
+
+      <div class="product-grid" id="catalog-grid"></div>
+      <div class="empty-state" id="catalog-empty" hidden>
+        <h3>No encontramos prendas con esos filtros</h3>
+        <p>Prueba cambiando el término de búsqueda, la categoría o la talla seleccionada.</p>
+        <button type="button" class="btn btn-primary" id="empty-reset-btn">Restablecer filtros</button>
+      </div>
+    </section>
+
+    <!-- 3. DETALLE DE PRODUCTO -->
+    <section id="view-detalle" class="view-section" aria-labelledby="detail-title">
+      <nav class="breadcrumb" aria-label="Ruta de navegación">
+        <button type="button" class="btn btn-ghost btn-sm" data-nav="catalogo">← Volver al catálogo</button>
+        <span aria-hidden="true">/</span>
+        <span id="detail-breadcrumb-cat">Categoría</span>
+      </nav>
+      <div class="detail-layout" id="detail-container"></div>
+    </section>
+
+    <!-- 4. CARRITO DE CONSULTAS (WHATSAPP) -->
+    <section id="view-carrito" class="view-section" aria-labelledby="cart-heading">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Carrito de Consultas · Issue #8</p>
+          <h1 id="cart-heading" style="margin:0;font-size:1.75rem;">Tu lista de consulta</h1>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" data-nav="catalogo">Seguir explorando</button>
+      </div>
+
+      <div class="cart-layout">
+        <div class="card" id="cart-items-container"></div>
+
+        <aside class="card" aria-label="Resumen de consulta">
+          <h2 style="margin:0 0 12px;font-size:1.125rem;">Resumen indicativo</h2>
+          <div class="specs-row" style="margin-bottom:12px;">
+            <span style="color:var(--ink-secondary);">Prendas seleccionadas</span>
+            <strong id="cart-total-units">0</strong>
+          </div>
+          <div class="specs-row" style="margin-bottom:16px;font-size:1.125rem;">
+            <span>Total referencial</span>
+            <strong id="cart-subtotal" style="color:var(--accent);">B/. 0.00</strong>
+          </div>
+
+          <div class="notice-box">
+            <strong>Modo prototipo:</strong> El número de tienda es <strong>+507 6522-6428</strong>. El envío real a WhatsApp (<code>wa.me</code>) se implementará en la Etapa B.
+          </div>
+
+          <label for="wa-preview" style="font-size:0.8125rem;font-weight:600;color:var(--ink-secondary);">Vista previa del mensaje de consulta</label>
+          <div id="wa-preview" class="wa-preview-box" aria-live="polite"></div>
+
+          <button type="button" class="btn btn-primary btn-full" id="wa-demo-btn">
+            Simular consulta a +507 6522-6428 (Prototipo)
+          </button>
+        </aside>
+      </div>
+    </section>
+
+    <!-- 5. ACCESO ADMINISTRATIVO -->
+    <section id="view-admin-login" class="view-section" aria-labelledby="login-heading">
+      <div class="auth-card">
+        <p class="eyebrow">Panel Interno · Issue #9</p>
+        <h1 id="login-heading" style="margin:0 0 8px;font-size:1.5rem;">Acceso administrativo</h1>
+        <p style="margin:0 0 20px;color:var(--ink-secondary);font-size:0.9375rem;">
+          Ingreso simulado para revisar la propuesta visual del panel de inventario. Sin autenticación real en esta etapa.
+        </p>
+
+        <form id="admin-login-form" novalidate>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="admin-email">Correo del personal</label>
+            <input id="admin-email" class="input" type="email" value="admin@lacasadeljean.pa" required />
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="admin-password">Contraseña</label>
+            <input id="admin-password" class="input" type="password" value="••••••••" required />
+          </div>
+          <div class="field" style="margin-bottom:18px;">
+            <label for="admin-role">Rol de demostración</label>
+            <select id="admin-role" class="select">
+              <option value="Administrador">Administrador (lectura, edición y publicación)</option>
+              <option value="Operador">Operador de inventario (ajustes de stock)</option>
+            </select>
+          </div>
+          <p id="login-error" style="color:var(--danger);font-size:0.875rem;margin:0 0 12px;" hidden></p>
+          <button type="submit" class="btn btn-primary btn-full">Entrar al panel de inventario</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- 6. PANEL DE INVENTARIO ADMINISTRATIVO -->
+    <section id="view-admin-panel" class="view-section" aria-labelledby="admin-heading">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Gestión de Catálogo e Inventario · Issue #9</p>
+          <h1 id="admin-heading" style="margin:0;font-size:1.75rem;">Panel de Inventario</h1>
+          <p id="admin-session-info" style="margin:4px 0 0;font-size:0.875rem;color:var(--ink-secondary);"></p>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" id="open-new-product-btn">+ Nueva prenda</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="admin-logout-btn">Cerrar sesión demo</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid" id="admin-kpis"></div>
+
+      <div class="filter-bar" style="margin-bottom:16px;">
+        <div class="field">
+          <label for="admin-search">Buscar por SKU o prenda</label>
+          <input id="admin-search" class="input" type="search" placeholder="Ej. DJ-CAB-101 o Chaqueta..." />
+        </div>
+        <div class="field">
+          <label for="admin-stock-filter">Estado de stock</label>
+          <select id="admin-stock-filter" class="select">
+            <option value="all">Todos</option>
+            <option value="low">Stock bajo (≤ 10 u.)</option>
+            <option value="ok">Stock saludable</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table aria-label="Inventario de productos">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Prenda</th>
+              <th>Categoría</th>
+              <th>Precio</th>
+              <th>Stock total</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="admin-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Ajuste de Stock / Confirmación -->
+  <div class="modal-backdrop" id="stock-modal" role="dialog" aria-modal="true" aria-labelledby="stock-modal-title">
+    <div class="modal">
+      <h3 id="stock-modal-title">Ajustar stock</h3>
+      <p id="stock-modal-subtitle" style="margin:0 0 16px;color:var(--ink-secondary);font-size:0.875rem;"></p>
+      <form id="stock-modal-form">
+        <div class="field" style="margin-bottom:12px;">
+          <label for="modal-size-select">Talla</label>
+          <select id="modal-size-select" class="select"></select>
+        </div>
+        <div class="field" style="margin-bottom:12px;">
+          <label for="modal-qty-input">Nueva cantidad en existencia</label>
+          <input id="modal-qty-input" class="input" type="number" min="0" max="500" required />
+        </div>
+        <div class="notice-box" style="margin-bottom:0;">
+          Confirmación requerida (Issue #9): los cambios de inventario quedarán auditados al conectarse a la API.
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="close-stock-modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-sm">Confirmar ajuste</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Nuevo Producto (Demo) -->
+  <div class="modal-backdrop" id="new-product-modal" role="dialog" aria-modal="true" aria-labelledby="new-product-title">
+    <div class="modal">
+      <h3 id="new-product-title">Registrar nueva prenda (Demo)</h3>
+      <p style="margin:0 0 16px;color:var(--ink-secondary);font-size:0.875rem;">
+        Simulación visual del formulario administrativo con confirmación previa a publicación.
+      </p>
+      <form id="new-product-form">
+        <div class="field" style="margin-bottom:10px;">
+          <label for="np-sku">SKU</label>
+          <input id="np-sku" class="input" type="text" placeholder="Ej. DJ-DAM-299" required />
+        </div>
+        <div class="field" style="margin-bottom:10px;">
+          <label for="np-name">Nombre de la prenda</label>
+          <input id="np-name" class="input" type="text" placeholder="Ej. Jean Straight Claro" required />
+        </div>
+        <div class="field" style="margin-bottom:10px;">
+          <label for="np-price">Precio (B/.)</label>
+          <input id="np-price" class="input" type="number" step="0.50" min="1" value="39.50" required />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="close-new-product-modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary btn-sm">Confirmar y agregar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <strong style="color:var(--ink);">La Casa del Jean</strong>
+          <p style="margin:6px 0 0;">Ciudad de Panamá, Panamá · Lun – Sáb · 9:00 a.m. – 7:00 p.m.</p>
+        </div>
+        <div>
+          <strong style="color:var(--ink);">Consultas</strong>
+          <p style="margin:6px 0 0;">WhatsApp (referencial): +507 6522-6428</p>
+        </div>
+        <div>
+          <strong style="color:var(--ink);">Referencias Fase 2</strong>
+          <p style="margin:6px 0 0;">Propuesta Etapa A · Issues #7, #8 y #9</p>
+        </div>
+      </div>
+      <p class="footer-disclaimer">
+        Aviso de prototipo: Las fotografías mostradas son ilustrativas (marcadores de posición con licencia abierta de Wikimedia Commons) y serán reemplazadas por fotografías reales del catálogo de La Casa del Jean. No representa un logotipo definitivo ni integra backend o flujo activo de WhatsApp.
+      </p>
+    </div>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
