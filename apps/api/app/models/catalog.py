@@ -169,16 +169,16 @@ class Variant(Base):
 
 
 class Price(Base):
-    """COP price record for a product or specific variant."""
+    """PAB price record for a product or specific variant."""
 
     __tablename__ = "prices"
     __table_args__ = (
-        CheckConstraint("amount_cop >= 0", name="amount_cop_non_negative"),
+        CheckConstraint("amount_pab >= 0", name="amount_pab_non_negative"),
         CheckConstraint(
-            "compare_at_cop IS NULL OR compare_at_cop >= amount_cop",
+            "compare_at_pab IS NULL OR compare_at_pab >= amount_pab",
             name="compare_at_ge_amount",
         ),
-        CheckConstraint("currency = 'COP'", name="currency_cop_only"),
+        CheckConstraint("currency = 'PAB'", name="currency_pab_only"),
         CheckConstraint("valid_to IS NULL OR valid_to > valid_from", name="valid_range_order"),
         Index(
             "uq_prices_current_product",
@@ -207,10 +207,10 @@ class Price(Base):
         nullable=True,
         index=True,
     )
-    amount_cop: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    compare_at_cop: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    amount_pab: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    compare_at_pab: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str] = mapped_column(
-        String(3), nullable=False, default="COP", server_default=text("'COP'")
+        String(3), nullable=False, default="PAB", server_default=text("'PAB'")
     )
     is_current: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")

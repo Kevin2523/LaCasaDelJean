@@ -67,8 +67,8 @@ def list_products(
     size: str | None = Query(default=None, max_length=32),
     color: str | None = Query(default=None, max_length=64),
     in_stock: bool | None = Query(default=None),
-    min_price_cop: Decimal | None = Query(default=None, ge=Decimal("0.00")),
-    max_price_cop: Decimal | None = Query(default=None, ge=Decimal("0.00")),
+    min_price_pab: Decimal | None = Query(default=None, ge=Decimal("0.00")),
+    max_price_pab: Decimal | None = Query(default=None, ge=Decimal("0.00")),
     sort_by: ProductSortBy = Query(default="newest"),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[ProductListItem]:
@@ -83,8 +83,8 @@ def list_products(
         size=size,
         color=color,
         in_stock=in_stock,
-        min_price_cop=min_price_cop,
-        max_price_cop=max_price_cop,
+        min_price_pab=min_price_pab,
+        max_price_pab=max_price_pab,
         sort_by=sort_by,
     )
 

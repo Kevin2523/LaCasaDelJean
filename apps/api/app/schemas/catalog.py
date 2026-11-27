@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from app.models.enums import PublicationStatus
-from app.schemas.common import ApiModel, CopDecimal, UtcDateTime
+from app.schemas.common import ApiModel, PabDecimal, UtcDateTime
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +56,8 @@ class PriceOut(ApiModel):
     id: uuid.UUID
     product_id: uuid.UUID
     variant_id: uuid.UUID | None = None
-    amount_cop: CopDecimal
-    compare_at_cop: CopDecimal | None = None
+    amount_pab: PabDecimal
+    compare_at_pab: PabDecimal | None = None
     currency: str
     is_current: bool
     valid_from: UtcDateTime
@@ -67,21 +67,21 @@ class PriceOut(ApiModel):
 
 class PriceCreate(ApiModel):
     variant_id: uuid.UUID | None = None
-    amount_cop: Decimal = Field(ge=Decimal("0.00"), max_digits=12, decimal_places=2)
-    compare_at_cop: Decimal | None = Field(default=None, ge=Decimal("0.00"), max_digits=12, decimal_places=2)
-    currency: str = Field(default="COP", min_length=3, max_length=3)
+    amount_pab: Decimal = Field(ge=Decimal("0.00"), max_digits=12, decimal_places=2)
+    compare_at_pab: Decimal | None = Field(default=None, ge=Decimal("0.00"), max_digits=12, decimal_places=2)
+    currency: str = Field(default="PAB", min_length=3, max_length=3)
 
     @field_validator("currency")
     @classmethod
     def validate_currency(cls, value: str) -> str:
-        if value != "COP":
-            raise ValueError("Only 'COP' currency is supported.")
+        if value != "PAB":
+            raise ValueError("Only 'PAB' currency is supported.")
         return value
 
     @model_validator(mode="after")
     def validate_compare_at(self) -> PriceCreate:
-        if self.compare_at_cop is not None and self.compare_at_cop < self.amount_cop:
-            raise ValueError("compare_at_cop must be greater than or equal to amount_cop.")
+        if self.compare_at_pab is not None and self.compare_at_pab < self.amount_pab:
+            raise ValueError("compare_at_pab must be greater than or equal to amount_pab.")
         return self
 
 

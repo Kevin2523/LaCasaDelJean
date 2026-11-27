@@ -116,10 +116,10 @@ def _create_sample_catalog(client: TestClient) -> dict:
     )
     assert mov.status_code == 201, mov.text
 
-    # Set product price in COP
+    # Set product price in PAB
     price1 = client.post(
         f"/api/v1/admin/products/{p1_id}/prices",
-        json={"amount_cop": "149900.00", "compare_at_cop": "179900.00", "currency": "COP"},
+        json={"amount_pab": "149900.00", "compare_at_pab": "179900.00", "currency": "PAB"},
     )
     assert price1.status_code == 201, price1.text
 
@@ -166,7 +166,7 @@ def _create_sample_catalog(client: TestClient) -> dict:
     assert v_p2.status_code == 201, v_p2.text
     client.post(
         f"/api/v1/admin/products/{p2_id}/prices",
-        json={"amount_cop": "229900.00", "currency": "COP"},
+        json={"amount_pab": "229900.00", "currency": "PAB"},
     )
 
     # Draft and archived products (must NEVER appear in public endpoints)
@@ -226,7 +226,7 @@ def test_write_routes_fail_closed_without_auth(public_client: TestClient) -> Non
         ("PATCH", f"/api/v1/admin/products/{fake_id}", {"name": "N2"}),
         ("POST", f"/api/v1/admin/products/{fake_id}/variants", {"sku": "V", "size": "M", "color": "Azul"}),
         ("PATCH", f"/api/v1/admin/variants/{fake_id}", {"size": "L"}),
-        ("POST", f"/api/v1/admin/products/{fake_id}/prices", {"amount_cop": "10000.00"}),
+        ("POST", f"/api/v1/admin/products/{fake_id}/prices", {"amount_pab": "10000.00"}),
         (
             "POST",
             f"/api/v1/admin/products/{fake_id}/images",
@@ -288,7 +288,10 @@ def test_public_catalog_filters_pagination_and_publication_isolation(
     detail = public_client.get(f"/api/v1/products/slug/{data['p1']['slug']}")
     assert detail.status_code == 200
     d_body = detail.json()
-    assert d_body["current_price"]["amount_cop"] == "149900.00"
+    assert d_body["current_price"]["amount_pab"] == "149900.00"
+    assert d_body["current_price"]["compare_at_pab"] == "179900.00"
+    assert d_body["current_price"]["currency"] == "PAB"
+    assert "amount_cop" not in d_body["current_price"]
     assert len(d_body["variants"]) == 2
     variant_skus = {v["sku"]: v for v in d_body["variants"]}
     assert "JEAN-SLIM-001-34-GRIS" not in variant_skus
@@ -313,15 +316,15 @@ def test_public_catalog_filters_pagination_and_publication_isolation(
     assert [p["slug"] for p in by_size.json()["items"]] == ["jean-slim-azul-clasico"]
 
     # Filter: price range + sort_by=price_desc
-    by_price = public_client.get("/api/v1/products?min_price_cop=100000&max_price_cop=250000&sort_by=price_desc")
+    by_price = public_client.get("/api/v1/products?min_price_pab=100000&max_price_pab=250000&sort_by=price_desc")
     assert by_price.status_code == 200
     assert [p["slug"] for p in by_price.json()["items"]] == [
         "chaqueta-denim-vintage",
         "jean-slim-azul-clasico",
     ]
 
-    # Validation error: min_price_cop > max_price_cop
-    bad_range = public_client.get("/api/v1/products?min_price_cop=300000&max_price_cop=100000")
+    # Validation error: min_price_pab > max_price_pab
+    bad_range = public_client.get("/api/v1/products?min_price_pab=300000&max_price_pab=100000")
     assert bad_range.status_code == 422
     assert bad_range.json()["error"]["code"] == "VALIDATION_ERROR"
 
@@ -333,21 +336,23 @@ def test_admin_prices_images_validation_and_audit(
     data = _create_sample_catalog(admin_client)
     p1_id = data["p1"]["id"]
 
-    # Price validation: non-COP currency rejected
-    bad_curr = admin_client.post(
-        f"/api/v1/admin/products/{p1_id}/prices",
-        json={"amount_cop": "100000.00", "currency": "USD"},
-    )
-    assert bad_curr.status_code == 422
-    assert bad_curr.json()["error"]["code"] == "VALIDATION_ERROR"
+    # Only PAB is accepted, including when a client explicitly sends a currency.
+    for currency in ("COP", "USD"):
+        bad_curr = admin_client.post(
+            f"/api/v1/admin/products/{p1_id}/prices",
+            json={"amount_pab": "100000.00", "currency": currency},
+        )
+        assert bad_curr.status_code == 422
+        assert bad_curr.json()["error"]["code"] == "VALIDATION_ERROR"
 
     # Price update: previous current price is closed atomically
     new_price = admin_client.post(
         f"/api/v1/admin/products/{p1_id}/prices",
-        json={"amount_cop": "159900.00", "currency": "COP"},
+        json={"amount_pab": "159900.00"},
     )
     assert new_price.status_code == 201
-    assert new_price.json()["amount_cop"] == "159900.00"
+    assert new_price.json()["amount_pab"] == "159900.00"
+    assert new_price.json()["currency"] == "PAB"
 
     all_prices = db_session.scalars(
         select(Price).where(Price.product_id == uuid.UUID(p1_id), Price.variant_id.is_(None))
@@ -355,7 +360,7 @@ def test_admin_prices_images_validation_and_audit(
     assert len(all_prices) == 2
     assert sum(1 for p in all_prices if p.is_current) == 1
     current = next(p for p in all_prices if p.is_current)
-    assert current.amount_cop == Decimal("159900.00")
+    assert current.amount_pab == Decimal("159900.00")
 
     # Image metadata: setting a second primary unsets the first atomically
     img2 = admin_client.post(

@@ -233,12 +233,12 @@ def list_public_products(
     size: str | None = None,
     color: str | None = None,
     in_stock: bool | None = None,
-    min_price_cop: Decimal | None = None,
-    max_price_cop: Decimal | None = None,
+    min_price_pab: Decimal | None = None,
+    max_price_pab: Decimal | None = None,
     sort_by: ProductSortBy = "newest",
 ) -> PaginatedResponse[ProductListItem]:
-    if min_price_cop is not None and max_price_cop is not None and min_price_cop > max_price_cop:
-        raise DomainValidationError("min_price_cop cannot be greater than max_price_cop.")
+    if min_price_pab is not None and max_price_pab is not None and min_price_pab > max_price_pab:
+        raise DomainValidationError("min_price_pab cannot be greater than max_price_pab.")
 
     published = PublicationStatus.PUBLISHED.value
     stmt = (
@@ -299,7 +299,7 @@ def list_public_products(
             stmt = stmt.where(exists(select(Variant.id).where(*v_conds)))
 
     current_price_subq = (
-        select(Price.amount_cop)
+        select(Price.amount_pab)
         .where(
             Price.product_id == Product.id,
             Price.variant_id.is_(None),
@@ -309,10 +309,10 @@ def list_public_products(
         .scalar_subquery()
     )
 
-    if min_price_cop is not None:
-        stmt = stmt.where(current_price_subq >= min_price_cop)
-    if max_price_cop is not None:
-        stmt = stmt.where(current_price_subq <= max_price_cop)
+    if min_price_pab is not None:
+        stmt = stmt.where(current_price_subq >= min_price_pab)
+    if max_price_pab is not None:
+        stmt = stmt.where(current_price_subq <= max_price_pab)
 
     total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
@@ -787,8 +787,8 @@ def set_current_price(
     price = Price(
         product_id=product_id,
         variant_id=payload.variant_id,
-        amount_cop=payload.amount_cop,
-        compare_at_cop=payload.compare_at_cop,
+        amount_pab=payload.amount_pab,
+        compare_at_pab=payload.compare_at_pab,
         currency=payload.currency,
         is_current=True,
         valid_from=now,
@@ -805,7 +805,7 @@ def set_current_price(
         after_state={
             "product_id": str(product_id),
             "variant_id": str(payload.variant_id) if payload.variant_id else None,
-            "amount_cop": str(price.amount_cop),
+            "amount_pab": str(price.amount_pab),
             "currency": price.currency,
         },
         request_id=request_id,

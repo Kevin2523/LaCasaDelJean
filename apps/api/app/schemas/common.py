@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, PlainSerializer
 T = TypeVar("T")
 
 
-def _serialize_cop(value: Decimal) -> str:
+def _serialize_pab(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.01'))}"
 
 
@@ -20,7 +20,7 @@ def _serialize_utc(value: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
 
 
-CopDecimal = Annotated[Decimal, PlainSerializer(_serialize_cop, return_type=str, when_used="json")]
+PabDecimal = Annotated[Decimal, PlainSerializer(_serialize_pab, return_type=str, when_used="json")]
 UtcDateTime = Annotated[datetime, PlainSerializer(_serialize_utc, return_type=str, when_used="json")]
 
 

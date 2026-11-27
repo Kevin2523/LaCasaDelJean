@@ -114,31 +114,32 @@ def test_uniqueness_and_check_constraints(db_session: Session) -> None:
         db_session.flush()
     db_session.rollback()
 
-    # Negative COP price must fail
+    # Negative PAB price must fail
     with pytest.raises(IntegrityError):
         db_session.add(
             Price(
                 product_id=product.id,
                 variant_id=variant.id,
-                amount_cop=Decimal("-100.00"),
-                currency="COP",
+                amount_pab=Decimal("-100.00"),
+                currency="PAB",
             )
         )
         db_session.flush()
     db_session.rollback()
 
-    # Non-COP currency must fail
-    with pytest.raises(IntegrityError):
-        db_session.add(
-            Price(
-                product_id=product.id,
-                variant_id=variant.id,
-                amount_cop=Decimal("100000.00"),
-                currency="USD",
+    # Database constraint rejects both the former currency and unrelated ones.
+    for currency in ("COP", "USD"):
+        with pytest.raises(IntegrityError):
+            db_session.add(
+                Price(
+                    product_id=product.id,
+                    variant_id=variant.id,
+                    amount_pab=Decimal("100000.00"),
+                    currency=currency,
+                )
             )
-        )
-        db_session.flush()
-    db_session.rollback()
+            db_session.flush()
+        db_session.rollback()
 
     # Only one primary image per product allowed
     db_session.add(
