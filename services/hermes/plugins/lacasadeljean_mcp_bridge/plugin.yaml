@@ -1,0 +1,8 @@
+name: lacasadeljean_mcp_bridge
+version: "0.1.0"
+description: >-
+  Trusted fail-closed Hermes plugin that enforces Telegram numeric user allowlist,
+  blocks model-controlled identity spoofing, injects per-call signed X-Actor-Assertion,
+  and validates scoped human-confirmed approval_proof for all inventory MCP writes.
+hooks:
+  - pre_tool_call
