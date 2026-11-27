@@ -16,6 +16,11 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY --chown=appuser:appgroup pyproject.toml alembic.ini ./
+COPY --chown=appuser:appgroup alembic ./alembic
+COPY --chown=appuser:appgroup app ./app
+COPY --chown=appuser:appgroup tests ./tests
+
 USER appuser
 
 EXPOSE 8000
