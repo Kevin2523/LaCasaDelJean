@@ -135,6 +135,8 @@ services:
     command: ["sh", "/usr/local/bin/init-hermes-config.sh"]
     environment:
       HERMES_DATA_DIR: /opt/data
+      HERMES_UID: ${HERMES_UID:-10000}
+      HERMES_GID: ${HERMES_GID:-10000}
       HERMES_FORCE_CONFIG_RESET: ${HERMES_FORCE_CONFIG_RESET:-false}
     volumes:
       - hermes_data:/opt/data

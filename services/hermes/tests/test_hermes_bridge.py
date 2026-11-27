@@ -401,4 +401,47 @@ def test_compose_has_hermes_init_bootstrap_and_completed_dependency() -> None:
 
     script = (REPO_ROOT / "services/hermes/scripts/init-hermes-config.sh").read_text(encoding="utf-8")
     assert "HERMES_FORCE_CONFIG_RESET" in script
-    assert 'if [ ! -f "${TARGET}" ]' in script
+    assert "0666" not in script
+    assert "0600" in script
+    assert "10000" in script
+
+
+def test_init_hermes_config_script_execution(tmp_path: Path) -> None:
+    """Execute init-hermes-config.sh against a temp dir: first copy, preserve, and explicit reset."""
+    import os
+    import shutil
+    import subprocess
+
+    # Prefer Git Bash on Windows (avoids WSL path translation issues), else sh/bash on POSIX
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    shell = str(git_bash) if git_bash.exists() else (shutil.which("sh") or shutil.which("bash"))
+    assert shell is not None, "Se requiere sh o bash para ejecutar la prueba de bootstrap"
+
+    script_path = REPO_ROOT / "services/hermes/scripts/init-hermes-config.sh"
+    data_dir = tmp_path / "opt_data"
+    data_dir.mkdir()
+    template = data_dir / "config.template.yaml"
+    template.write_text("_config_version: 54\nagent:\n  max_turns: 12\n", encoding="utf-8")
+    target = data_dir / "config.yaml"
+
+    env = os.environ.copy()
+    env["HERMES_DATA_DIR"] = data_dir.as_posix()
+    env["HERMES_FORCE_CONFIG_RESET"] = "false"
+
+    # 1. First run: copies template -> config.yaml
+    r1 = subprocess.run([shell, script_path.as_posix()], env=env, capture_output=True, text=True, check=False)
+    assert r1.returncode == 0, f"stdout={r1.stdout} stderr={r1.stderr}"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == template.read_text(encoding="utf-8")
+
+    # 2. Second run: preserves user-modified config.yaml
+    target.write_text("_config_version: 54\nagent:\n  max_turns: 20\n", encoding="utf-8")
+    r2 = subprocess.run([shell, script_path.as_posix()], env=env, capture_output=True, text=True, check=False)
+    assert r2.returncode == 0, f"stdout={r2.stdout} stderr={r2.stderr}"
+    assert "max_turns: 20" in target.read_text(encoding="utf-8")
+
+    # 3. Explicit reset: overwrites config.yaml with template
+    env["HERMES_FORCE_CONFIG_RESET"] = "true"
+    r3 = subprocess.run([shell, script_path.as_posix()], env=env, capture_output=True, text=True, check=False)
+    assert r3.returncode == 0, f"stdout={r3.stdout} stderr={r3.stderr}"
+    assert target.read_text(encoding="utf-8") == template.read_text(encoding="utf-8")
