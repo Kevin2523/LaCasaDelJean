@@ -246,7 +246,7 @@ async def upload_product_image(
     settings: Settings = Depends(get_app_settings),
     db: Session = Depends(get_db),
 ) -> ImageOut:
-    content = await file.read()
+    content = await file.read(catalog_service.MAX_IMAGE_UPLOAD_BYTES + 1)
     result = catalog_service.upload_product_image(
         db,
         product_id,

@@ -135,3 +135,12 @@ def test_admin_list_and_upload_rbac_and_persistence(
             files={"file": ("fake.png", b"not-a-real-png", "image/png")},
         )
         assert corrupt_upload.status_code == 422
+
+        # Reject oversized payload (> 5 MB) with 422
+        oversized_payload = b"\x00" * (5 * 1024 * 1024 + 1)
+        oversized_upload = client.post(
+            f"/api/v1/admin/products/{product_id}/images/upload",
+            headers=admin_headers,
+            files={"file": ("huge.png", oversized_payload, "image/png")},
+        )
+        assert oversized_upload.status_code == 422
