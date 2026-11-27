@@ -17,6 +17,7 @@ from app.api.routers.auth import router as auth_router
 from app.api.routers.catalog_admin import router as catalog_admin_router
 from app.api.routers.catalog_public import router as catalog_public_router
 from app.api.routers.inventory import router as inventory_router
+from app.api.routers.mcp_internal import router as mcp_internal_router
 from app.core.config import Settings, get_settings
 from app.db.session import build_engine, build_session_factory
 
@@ -70,6 +71,7 @@ def create_app(
     application.include_router(catalog_admin_router)
     application.include_router(audit_admin_router)
     application.include_router(inventory_router)
+    application.include_router(mcp_internal_router)
 
     media_dir = Path(resolved_settings.media_root)
     media_dir.mkdir(parents=True, exist_ok=True)

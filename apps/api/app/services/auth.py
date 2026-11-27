@@ -16,7 +16,7 @@ from app.models.audit import AuditEvent
 from app.models.auth import AuthSession, User
 from app.schemas.auth import AuditEventOut, AuthUserOut, LoginResponse
 from app.schemas.common import PaginatedResponse
-from app.services.errors import UnauthorizedError
+from app.services.errors import ForbiddenError, UnauthorizedError
 
 _INSECURE_SECRET_PREFIXES = ("CHANGE_ME", "dev-only")
 
@@ -94,6 +94,76 @@ def authenticate_user(
                 "expires_at": expires_at.isoformat(),
             },
             event_metadata={"ip_address": auth_session.ip_address},
+            request_id=request_id,
+            created_at=now,
+        )
+    )
+    db.flush()
+
+    token = create_access_token(
+        user_id=user.id,
+        session_id=auth_session.id,
+        role=user.role.name,
+        expires_at=expires_at,
+        secret_key=secret,
+        algorithm=cfg.jwt_algorithm,
+    )
+    return LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_at=expires_at,
+        user=_to_user_out(user),
+    )
+
+
+def exchange_telegram_user_for_session(
+    db: Session,
+    *,
+    telegram_user_id: int,
+    request_id: str | None = None,
+    settings: Settings | None = None,
+) -> LoginResponse:
+    """Map a verified Telegram numeric ID to an active User and issue a short-lived JWT session."""
+    if telegram_user_id <= 0:
+        raise ForbiddenError("Identificador de operador Telegram inválido.")
+
+    cfg = settings or get_settings()
+    secret = _validated_jwt_secret(cfg)
+
+    user = db.scalar(
+        select(User)
+        .options(joinedload(User.role))
+        .where(User.telegram_user_id == telegram_user_id)
+    )
+    if user is None or not user.is_active:
+        raise ForbiddenError("Operador Telegram no autorizado o inactivo.")
+
+    now = utcnow()
+    expires_at = now + timedelta(minutes=cfg.mcp_session_ttl_minutes)
+    auth_session = AuthSession(
+        user_id=user.id,
+        expires_at=expires_at,
+        ip_address=None,
+        user_agent="mcp-inventory-service",
+        created_at=now,
+    )
+    db.add(auth_session)
+    db.flush()
+
+    db.add(
+        AuditEvent(
+            actor_user_id=user.id,
+            entity_type="auth_session",
+            entity_id=auth_session.id,
+            action="mcp_exchange",
+            before_state=None,
+            after_state={
+                "user_id": str(user.id),
+                "role": user.role.name,
+                "telegram_user_id": telegram_user_id,
+                "expires_at": expires_at.isoformat(),
+            },
+            event_metadata={"source": "mcp-inventory-service"},
             request_id=request_id,
             created_at=now,
         )
