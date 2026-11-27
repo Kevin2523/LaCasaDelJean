@@ -175,15 +175,18 @@ def main() -> None:
             transport=SyncASGITransport(tc),
         )
 
+        op_uuid = "550e8400-e29b-41d4-a716-446655440001"
+        admin_uuid = "550e8400-e29b-41d4-a716-446655440002"
+
         # 1. Unknown user denied by pre_llm_call
         print(f"[1] Usuario desconocido ({UNKNOWN_TG_ID}) -> pre_llm_call:")
-        blocked = pre_llm(session_id="tg:unknown", platform="telegram", sender_id=UNKNOWN_TG_ID)
+        blocked = pre_llm(session_id="550e8400-e29b-41d4-a716-446655449999", platform="telegram", sender_id=UNKNOWN_TG_ID)
         print(f"    -> {blocked}\n")
 
-        # 2. Operator (role='operator') voice note -> propose_inventory_write -> post_gateway_admission CONFIRMAR
-        print(f"[2] Operador ({OPERATOR_TG_ID}, rol=operator) envía nota de voz -> pre_llm_call + {PROPOSAL_TOOL_NAME}:")
-        assert pre_llm(session_id="tg:op", platform="telegram", sender_id=OPERATOR_TG_ID) is None
-        assert pre_tool("record_stock_movement", {}, task_id="tg:op")["action"] == "block"
+        # 2. Operator (role='operator') voice note -> UUID session -> Telegram DM session_key CONFIRMAR
+        print(f"[2] Operador ({OPERATOR_TG_ID}, rol=operator) envía nota de voz -> pre_llm_call(UUID) + {PROPOSAL_TOOL_NAME}:")
+        assert pre_llm(session_id=op_uuid, platform="telegram", sender_id=OPERATOR_TG_ID) is None
+        assert pre_tool("record_stock_movement", {}, task_id=op_uuid)["action"] == "block"
         prop_voice = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
@@ -191,21 +194,21 @@ def main() -> None:
                     "arguments": {"variant_id": "var-32", "direction": "out", "movement_type": "sale", "quantity": 2},
                     "source_modality": "voice",
                 },
-                task_id="tg:op",
+                task_id=op_uuid,
             )
         )
         print(prop_voice["preview"])
         confirm_reply = post_adm(
-            session_key="tg:op",
+            session_key=f"agent:main:telegram:dm:{OPERATOR_TG_ID}",
             platform="telegram",
-            source={"user_id": OPERATOR_TG_ID},
+            source={"user_id": OPERATOR_TG_ID, "chat_id": OPERATOR_TG_ID, "chat_type": "dm"},
             text=f"CONFIRMAR {prop_voice['proposal_id']}",
         )
         print(f"    -> post_gateway_admission: {confirm_reply['reply']} (stock restante={backend.stock['var-32']})\n")
 
         # 3. Admin photo choice (pillow_optimize) via propose_inventory_write -> post_gateway_admission CONFIRMAR
         print(f"[3] Admin ({ADMIN_TG_ID}, rol=admin) envía foto -> photo_choice=pillow_optimize:")
-        assert pre_llm(session_id="tg:admin", platform="telegram", sender_id=ADMIN_TG_ID) is None
+        assert pre_llm(session_id=admin_uuid, platform="telegram", sender_id=ADMIN_TG_ID) is None
         prop_photo = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
@@ -220,13 +223,13 @@ def main() -> None:
                     "source_modality": "photo",
                     "photo_choice": "pillow_optimize",
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         photo_reply = post_adm(
-            session_key="tg:admin",
+            session_key=f"agent:main:telegram:dm:{ADMIN_TG_ID}",
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source={"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
             text=f"CONFIRMAR {prop_photo['proposal_id']}",
         )
         print(f"    -> post_gateway_admission: {photo_reply['reply']} (total fotos={len(backend.products['prod-1']['photos'])})\n")

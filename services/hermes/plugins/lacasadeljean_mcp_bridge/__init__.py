@@ -184,6 +184,29 @@ def _apply_photo_choice(args: dict[str, Any], proposal_args: dict[str, Any]) -> 
     return updated
 
 
+def _stable_dm_session(telegram_user_id: int) -> str:
+    """Stable per-user DM identity shared between Hermes UUID sessions and gateway session_key."""
+    return f"telegram:dm:{telegram_user_id}"
+
+
+def _validate_dm_source(source: dict[str, Any], verified_uid: int) -> None:
+    """Enforce private DM coherence when gateway source metadata includes chat_type / chat_id."""
+    chat_type = source.get("chat_type")
+    if chat_type is not None:
+        norm_type = str(chat_type).strip().lower()
+        if norm_type not in ("dm", "private"):
+            raise BridgeSecurityError(
+                "GROUP_CHAT_NOT_ALLOWED",
+                f"Las confirmaciones de inventario solo se permiten en chat privado (DM), no en '{norm_type}'.",
+            )
+    chat_id = source.get("chat_id")
+    if chat_id is not None and str(chat_id).strip() != str(verified_uid):
+        raise BridgeSecurityError(
+            "CHAT_ACTOR_MISMATCH",
+            "El chat_id de Telegram no coincide con el operador autenticado.",
+        )
+
+
 def build_hooks_and_handlers(
     *,
     config: BridgeConfig | None = None,
@@ -222,72 +245,86 @@ def build_hooks_and_handlers(
         text: str = "",
         **kwargs: Any,
     ) -> dict[str, Any] | None:
-        """Official v0.23.4 post_gateway_admission hook: intercept CONFIRMAR/CANCELAR outside LLM."""
-        del message_id, kwargs
+        """Official v0.23.4 post_gateway_admission hook: intercept CONFIRMAR/CANCELAR outside LLM.
+
+        Because Hermes treats an uncaught exception in post_gateway_admission as fail-open,
+        the entire CONFIRMAR/CANCELAR path is wrapped so it ALWAYS returns `{"action": "handled", ...}`
+        and never leaks a confirmation command to the LLM.
+        """
+        del session_key, message_id, kwargs
         match = _CONFIRM_CANCEL_RE.match(text or "")
         if not match:
             return None
 
-        verb = match.group(1).upper()
-        proposal_id = match.group(2)
-        src = source if isinstance(source, dict) else {}
-        raw_user_id = src.get("user_id") if src.get("user_id") is not None else src.get("sender_id")
-
-        cfg = _cfg()
         try:
-            uid = parse_verified_telegram_sender(platform=platform, sender_id=raw_user_id)
-            if not cfg.allowed_telegram_users or uid not in cfg.allowed_telegram_users:
-                raise BridgeSecurityError(
-                    "USER_NOT_ALLOWED",
-                    f"El usuario de Telegram {uid} no está autorizado en TELEGRAM_ALLOWED_USERS.",
-                )
-        except BridgeSecurityError as exc:
-            return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+            verb = match.group(1).upper()
+            proposal_id = match.group(2)
+            src = source if isinstance(source, dict) else {}
+            raw_user_id = src.get("user_id") if src.get("user_id") is not None else src.get("sender_id")
 
-        if verb in ("CANCELAR", "CANCEL"):
+            cfg = _cfg()
             try:
-                wf.cancel_proposal(
+                uid = parse_verified_telegram_sender(platform=platform, sender_id=raw_user_id)
+                if not cfg.allowed_telegram_users or uid not in cfg.allowed_telegram_users:
+                    raise BridgeSecurityError(
+                        "USER_NOT_ALLOWED",
+                        f"El usuario de Telegram {uid} no está autorizado en TELEGRAM_ALLOWED_USERS.",
+                    )
+                _validate_dm_source(src, uid)
+            except BridgeSecurityError as exc:
+                return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+
+            dm_session = _stable_dm_session(uid)
+
+            if verb in ("CANCELAR", "CANCEL"):
+                try:
+                    wf.cancel_proposal(
+                        proposal_id=proposal_id,
+                        telegram_user_id=uid,
+                        session_id=dm_session,
+                        now=_now(),
+                    )
+                except WorkflowError as exc:
+                    return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+                return {
+                    "action": "handled",
+                    "reply": f"❌ Propuesta {proposal_id} cancelada. No se realizó ningún cambio en el inventario.",
+                }
+
+            # Explicit CONFIRMAR -> execute via trusted internal MCP bridge outside the LLM
+            client = TrustedMCPBridgeClient(
+                cfg,
+                sync_transport=transport,
+                approval_store=approvals,
+            )
+            try:
+                result = wf.confirm_proposal_sync(
                     proposal_id=proposal_id,
                     telegram_user_id=uid,
-                    session_id=session_key,
+                    session_id=dm_session,
+                    bridge_client=client,
                     now=_now(),
                 )
             except WorkflowError as exc:
                 return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+
+            if not result.get("ok"):
+                err = result.get("error") or {}
+                return {
+                    "action": "handled",
+                    "reply": f"⛔ Error al ejecutar {proposal_id}: [{err.get('code', 'MCP_ERROR')}] {err.get('message', '')}",
+                }
+
             return {
                 "action": "handled",
-                "reply": f"❌ Propuesta {proposal_id} cancelada. No se realizó ningún cambio en el inventario.",
+                "reply": f"✅ Propuesta {proposal_id} confirmada y ejecutada vía MCP.",
+                "result": result,
             }
-
-        # Explicit CONFIRMAR -> execute via trusted internal MCP bridge outside the LLM
-        client = TrustedMCPBridgeClient(
-            cfg,
-            sync_transport=transport,
-            approval_store=approvals,
-        )
-        try:
-            result = wf.confirm_proposal_sync(
-                proposal_id=proposal_id,
-                telegram_user_id=uid,
-                session_id=session_key,
-                bridge_client=client,
-                now=_now(),
-            )
-        except WorkflowError as exc:
-            return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
-
-        if not result.get("ok"):
-            err = result.get("error") or {}
+        except Exception:
             return {
                 "action": "handled",
-                "reply": f"⛔ Error al ejecutar {proposal_id}: [{err.get('code', 'MCP_ERROR')}] {err.get('message', '')}",
+                "reply": "⛔ [INTERNAL_CONFIRMATION_ERROR] Error interno al procesar la confirmación/cancelación. No se realizó ningún cambio.",
             }
-
-        return {
-            "action": "handled",
-            "reply": f"✅ Propuesta {proposal_id} confirmada y ejecutada vía MCP.",
-            "result": result,
-        }
 
     def on_pre_llm_call(
         session_id: str = "",
@@ -400,7 +437,7 @@ def build_hooks_and_handlers(
                 ensure_ascii=False,
             )
 
-        effective_session = session_id or conversation_id or task_id
+        effective_session = _stable_dm_session(uid)
         action = str(args.get("action") or "")
         proposal_args = dict(args.get("arguments") or {})
         modality = args.get("source_modality") or "text"

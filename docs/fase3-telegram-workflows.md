@@ -8,7 +8,7 @@ Documentación técnica del Issue #12 (**F3-03**) para operar el catálogo e inv
 
 - **Herramientas expuestas al LLM (`provides_tools`):** Únicamente las 3 herramientas de **solo lectura** (`search_products`, `get_product_detail`, `get_variant_stock`) y la herramienta **no mutante** `propose_inventory_write`.
 - **Las 6 herramientas de escritura NO están expuestas al modelo:** `pre_tool_call` bloquea cualquier intento del modelo de invocar directamente `create_product_draft`, `create_variant`, `attach_product_photo`, `set_product_price`, `record_stock_movement` o `set_product_publication_status`.
-- **Hook oficial `post_gateway_admission`:** Intercepta respuestas humanas `CONFIRMAR <proposal_id>` / `CANCELAR <proposal_id>` tras la autenticación del gateway, valida `platform == "telegram"`, `source.user_id` en `TELEGRAM_ALLOWED_USERS` y coincidencia exacta de `session_key`, ejecuta la escritura **fuera del LLM** vía `TrustedMCPBridgeClient` → `services/mcp` → FastAPI, y retorna `{"action": "handled", "reply": "..."}` omitiendo el turno del modelo.
+- **Hook oficial `post_gateway_admission`:** Intercepta respuestas humanas `CONFIRMAR <proposal_id>` / `CANCELAR <proposal_id>` tras la autenticación del gateway, valida `platform == "telegram"`, `source.user_id` en `TELEGRAM_ALLOWED_USERS`, coherencia de DM privado (`chat_type == "dm"`, `chat_id == user_id`) y vinculación estable `telegram:dm:<uid>` (independiente de la diferencia entre el UUID de sesión Hermes y el `session_key` de enrutamiento `agent:main:telegram:dm:<chat_id>`). Todo el flujo está protegido para devolver siempre `{"action": "handled", ...}` ante cualquier error inesperado (evitando comportamiento fail-open hacia el LLM).
 - **Roles reales de backend:** `admin` y `operator` (mapeados por `telegram_user_id` en FastAPI; RBAC aplicado en FastAPI/MCP).
 
 ---
@@ -31,7 +31,8 @@ Documentación técnica del Issue #12 (**F3-03**) para operar el catálogo e inv
 - **`original`:** Valida con Pillow y elimina metadatos EXIF manteniendo dimensiones originales.
 - **`pillow_optimize`:** Auto-orienta, redimensiona, aplica mejora suave de contraste/nitidez, convierte a WebP y elimina EXIF.
 - **`exact_model_web_search`:** Solo para tenis o productos comerciales verificables. Exige coincidencia exacta de marca, modelo y código (`MODEL_IDENTITY_MISMATCH` / `MODEL_CODE_MISMATCH`) **y** licencia permitida (`brand_press_kit`, `authorized_distributor`, `merchant_owned`, `cc0`, `cc_by`, `cc_by_sa`, `public_domain`). Rechaza copyright arbitrario o licencia desconocida (`COPYRIGHT_LICENSE_REJECTED`).
-  - **Límite documentado:** El plugin no hace scraping web arbitrario. Si no hay un proveedor autorizado de búsqueda de imágenes configurado que entregue un candidato con licencia verificada (`external_image_candidate`), falla cerrado con `EXTERNAL_SEARCH_PROVIDER_REQUIRED` y solicita al operador elegir `original` o `pillow_optimize`.
+  - **Límite documentado (búsqueda externa):** El plugin no hace scraping web arbitrario. Si no hay un proveedor autorizado de búsqueda de imágenes configurado que entregue un candidato con licencia verificada (`external_image_candidate`), falla cerrado con `EXTERNAL_SEARCH_PROVIDER_REQUIRED` y solicita al operador elegir `original` o `pillow_optimize`.
+  - **Límite documentado (staging de adjuntos Telegram):** `propose_inventory_write` recibe `image_base64` ya preparado porque los hooks actuales de plugins Hermes v0.23.4 (`pre_tool_call` / `post_gateway_admission`) no exponen los bytes crudos de adjuntos binarios de Telegram directamente al plugin; la integración con adjuntos binarios requiere staging confiable de la foto recibida antes de construir la propuesta.
 
 ---
 

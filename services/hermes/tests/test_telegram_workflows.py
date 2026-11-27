@@ -268,27 +268,35 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
             clock=lambda: now_box[0],
         )
 
+        # Realistic Hermes session UUIDs (distinct from Telegram gateway session_key!)
+        op_uuid = "550e8400-e29b-41d4-a716-446655440001"
+        admin_uuid = "550e8400-e29b-41d4-a716-446655440002"
+        op_session_key = f"agent:main:telegram:dm:{OPERATOR_TG_ID}"
+        admin_session_key = f"agent:main:telegram:dm:{ADMIN_TG_ID}"
+        op_source = {"user_id": OPERATOR_TG_ID, "chat_id": OPERATOR_TG_ID, "chat_type": "dm"}
+        admin_source = {"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"}
+
         # Unknown user denied at pre_llm_call AND post_gateway_admission
-        assert pre_llm(session_id="tg:unknown", platform="telegram", sender_id=UNKNOWN_TG_ID)["action"] == "block"
+        assert pre_llm(session_id="550e8400-e29b-41d4-a716-446655449999", platform="telegram", sender_id=UNKNOWN_TG_ID)["action"] == "block"
         unknown_adm = post_adm(
-            session_key="tg:unknown",
+            session_key=f"agent:main:telegram:dm:{UNKNOWN_TG_ID}",
             platform="telegram",
-            source={"user_id": UNKNOWN_TG_ID},
+            source={"user_id": UNKNOWN_TG_ID, "chat_id": UNKNOWN_TG_ID, "chat_type": "dm"},
             text="CONFIRMAR prop_deadbeef",
         )
         assert unknown_adm is not None and unknown_adm["action"] == "handled"
         assert "USER_NOT_ALLOWED" in unknown_adm["reply"]
 
         # Normal message passes through post_gateway_admission (returns None)
-        assert post_adm(session_key="tg:op", platform="telegram", source={"user_id": OPERATOR_TG_ID}, text="vendí 2 jeans") is None
+        assert post_adm(session_key=op_session_key, platform="telegram", source=op_source, text="vendí 2 jeans") is None
 
-        # Operator binds session, reads shared catalog, and proposes voice stock movement
-        assert pre_llm(session_id="tg:op", platform="telegram", sender_id=OPERATOR_TG_ID) is None
-        assert pre_tool("search_products", {"search": "Jean"}, task_id="tg:op") is None
-        search_res = json.loads(handlers["search_products"]({"search": "Jean"}, task_id="tg:op"))
+        # Operator binds UUID session, reads shared catalog, and proposes voice stock movement
+        assert pre_llm(session_id=op_uuid, platform="telegram", sender_id=OPERATOR_TG_ID) is None
+        assert pre_tool("search_products", {"search": "Jean"}, task_id=op_uuid) is None
+        search_res = json.loads(handlers["search_products"]({"search": "Jean"}, task_id=op_uuid))
         assert search_res["ok"] is True
 
-        assert pre_tool(PROPOSAL_TOOL_NAME, {"action": "record_stock_movement", "arguments": {}}, task_id="tg:op") is None
+        assert pre_tool(PROPOSAL_TOOL_NAME, {"action": "record_stock_movement", "arguments": {}}, task_id=op_uuid) is None
         prop_res = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
@@ -296,7 +304,7 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
                     "arguments": {"variant_id": "var-32", "direction": "out", "movement_type": "sale", "quantity": 2},
                     "source_modality": "voice",
                 },
-                task_id="tg:op",
+                task_id=op_uuid,
             )
         )
         assert prop_res["ok"] is True
@@ -305,30 +313,40 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
 
         # Cross-user confirmation attempt via post_gateway_admission fails closed
         cross_user = post_adm(
-            session_key="tg:op",
+            session_key=admin_session_key,
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source=admin_source,
             text=f"CONFIRMAR {pid}",
         )
         assert cross_user["action"] == "handled"
         assert "UNAUTHORIZED_APPROVER" in cross_user["reply"]
         assert backend.stock["var-32"] == 10
 
-        # Cross-session confirmation attempt by same user fails closed
-        cross_sess = post_adm(
-            session_key="tg:op-other-chat",
+        # Group chat confirmation attempt fails closed
+        group_resp = post_adm(
+            session_key="agent:main:telegram:group:-100123",
             platform="telegram",
-            source={"user_id": OPERATOR_TG_ID},
+            source={"user_id": OPERATOR_TG_ID, "chat_id": -100123, "chat_type": "group"},
             text=f"CONFIRMAR {pid}",
         )
-        assert cross_sess["action"] == "handled"
-        assert "SESSION_MISMATCH" in cross_sess["reply"]
+        assert group_resp["action"] == "handled"
+        assert "GROUP_CHAT_NOT_ALLOWED" in group_resp["reply"]
 
-        # Valid explicit CONFIRMAR by operator in same session executes via MCP -> FastAPI + audit
-        confirmed = post_adm(
-            session_key="tg:op",
+        # Mismatched chat_id in DM fails closed
+        bad_chat = post_adm(
+            session_key=op_session_key,
             platform="telegram",
-            source={"user_id": OPERATOR_TG_ID},
+            source={"user_id": OPERATOR_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
+            text=f"CONFIRMAR {pid}",
+        )
+        assert bad_chat["action"] == "handled"
+        assert "CHAT_ACTOR_MISMATCH" in bad_chat["reply"]
+
+        # Valid explicit CONFIRMAR with real Telegram session_key (different from op_uuid!) succeeds
+        confirmed = post_adm(
+            session_key=op_session_key,
+            platform="telegram",
+            source=op_source,
             text=f"CONFIRMAR {pid}",
         )
         assert confirmed["action"] == "handled"
@@ -338,9 +356,9 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
 
         # Replay CONFIRMAR on same proposal fails closed
         replayed = post_adm(
-            session_key="tg:op",
+            session_key=op_session_key,
             platform="telegram",
-            source={"user_id": OPERATOR_TG_ID},
+            source=op_source,
             text=f"CONFIRMAR {pid}",
         )
         assert "APPROVAL_REPLAYED" in replayed["reply"]
@@ -353,40 +371,40 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
                     "action": "set_product_publication_status",
                     "arguments": {"product_id": "prod-1", "publication_status": "published"},
                 },
-                task_id="tg:op",
+                task_id=op_uuid,
             )
         )
         rbac_resp = post_adm(
-            session_key="tg:op",
+            session_key=op_session_key,
             platform="telegram",
-            source={"user_id": OPERATOR_TG_ID},
+            source=op_source,
             text=f"CONFIRMAR {pub_prop['proposal_id']}",
         )
         assert rbac_resp["action"] == "handled"
         assert backend.products["prod-1"]["publication_status"] == "draft"
 
-        # Explicit CANCELAR by admin
-        assert pre_llm(session_id="tg:admin", platform="telegram", sender_id=ADMIN_TG_ID) is None
+        # Explicit CANCELAR by admin (UUID session -> Telegram DM session_key)
+        assert pre_llm(session_id=admin_uuid, platform="telegram", sender_id=ADMIN_TG_ID) is None
         cancel_prop = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
                     "action": "set_product_publication_status",
                     "arguments": {"product_id": "prod-1", "publication_status": "published"},
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         cancelled = post_adm(
-            session_key="tg:admin",
+            session_key=admin_session_key,
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source=admin_source,
             text=f"CANCELAR {cancel_prop['proposal_id']}",
         )
         assert "❌" in cancelled["reply"]
         after_cancel = post_adm(
-            session_key="tg:admin",
+            session_key=admin_session_key,
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source=admin_source,
             text=f"CONFIRMAR {cancel_prop['proposal_id']}",
         )
         assert "PROPOSAL_CANCELLED" in after_cancel["reply"]
@@ -398,14 +416,14 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
                     "action": "set_product_publication_status",
                     "arguments": {"product_id": "prod-1", "publication_status": "published"},
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         now_box[0] += 125
         expired = post_adm(
-            session_key="tg:admin",
+            session_key=admin_session_key,
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source=admin_source,
             text=f"CONFIRMAR {exp_prop['proposal_id']}",
         )
         assert "PROPOSAL_EXPIRED" in expired["reply"]
@@ -417,11 +435,11 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
             approval_store=TrustedApprovalStore(),
             transport=transport,
         )
-        assert pre_tool_restarted("search_products", {}, task_id="tg:admin")["action"] == "block"
+        assert pre_tool_restarted("search_products", {}, task_id=admin_uuid)["action"] == "block"
         restart_confirm = post_adm_restarted(
-            session_key="tg:admin",
+            session_key=admin_session_key,
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source=admin_source,
             text=f"CONFIRMAR {exp_prop['proposal_id']}",
         )
         assert "PROPOSAL_NOT_FOUND" in restart_confirm["reply"]
@@ -548,10 +566,43 @@ def test_mcp_timeout_through_gateway_confirmation_fails_cleanly() -> None:
         )
     )
     resp = post_adm(
-        session_key="tg:admin",
+        session_key=f"agent:main:telegram:dm:{ADMIN_TG_ID}",
         platform="telegram",
-        source={"user_id": ADMIN_TG_ID},
+        source={"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
         text=f"CONFIRMAR {prop['proposal_id']}",
     )
     assert resp["action"] == "handled"
     assert "MCP_TIMEOUT" in resp["reply"]
+
+
+def test_post_gateway_admission_never_raises_fail_open_on_unexpected_error() -> None:
+    def boom_handler(_request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("Unexpected crash inside transport")
+
+    registry = SessionActorRegistry()
+    post_adm, pre_llm, _, _, handlers = build_hooks_and_handlers(
+        config=_make_bridge_config(),
+        session_registry=registry,
+        approval_store=TrustedApprovalStore(),
+        transport=httpx.MockTransport(boom_handler),
+    )
+    assert pre_llm(session_id="550e8400-e29b-41d4-a716-446655440009", platform="telegram", sender_id=ADMIN_TG_ID) is None
+    prop = json.loads(
+        handlers[PROPOSAL_TOOL_NAME](
+            {
+                "action": "record_stock_movement",
+                "arguments": {"variant_id": "var-32", "direction": "out", "movement_type": "sale", "quantity": 1},
+            },
+            task_id="550e8400-e29b-41d4-a716-446655440009",
+        )
+    )
+    # Must return handled (never raise and never fall through to LLM)
+    resp = post_adm(
+        session_key=f"agent:main:telegram:dm:{ADMIN_TG_ID}",
+        platform="telegram",
+        source={"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
+        text=f"CONFIRMAR {prop['proposal_id']}",
+    )
+    assert resp is not None
+    assert resp["action"] == "handled"
+    assert "INTERNAL_CONFIRMATION_ERROR" in resp["reply"]
