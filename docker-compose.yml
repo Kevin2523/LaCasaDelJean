@@ -98,6 +98,7 @@ services:
     container_name: lcdj_mcp
     profiles:
       - mcp
+      - hermes
     restart: unless-stopped
     env_file:
       - path: .env
@@ -125,37 +126,82 @@ services:
           cpus: "0.50"
           memory: 256M
 
+  hermes_init:
+    image: alpine:3.20
+    container_name: lcdj_hermes_init
+    profiles:
+      - hermes
+    restart: "no"
+    command: ["sh", "/usr/local/bin/init-hermes-config.sh"]
+    environment:
+      HERMES_DATA_DIR: /opt/data
+      HERMES_UID: ${HERMES_UID:-10000}
+      HERMES_GID: ${HERMES_GID:-10000}
+      HERMES_FORCE_CONFIG_RESET: ${HERMES_FORCE_CONFIG_RESET:-false}
+    volumes:
+      - hermes_data:/opt/data
+      - ./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro
+      - ./services/hermes/scripts/init-hermes-config.sh:/usr/local/bin/init-hermes-config.sh:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
   hermes:
-    build:
-      context: ./services/hermes
-      dockerfile: Dockerfile
+    image: nousresearch/hermes-agent:${HERMES_IMAGE_TAG:-v0.23.4}
     container_name: lcdj_hermes
     profiles:
       - hermes
     restart: unless-stopped
+    command: ["gateway", "run"]
     env_file:
       - path: .env
         required: false
     environment:
       APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      API_INTERNAL_URL: http://api:8000
+      TZ: ${TZ:-America/Bogota}
+      HERMES_HOME: /opt/data
+      HERMES_MCP_URL: ${HERMES_MCP_URL:-http://mcp:8010/mcp}
+      HERMES_MCP_SHARED_SECRET: ${HERMES_MCP_SHARED_SECRET:-}
+      MCP_ACTOR_ASSERTION_SECRET: ${MCP_ACTOR_ASSERTION_SECRET:-}
+      MCP_APPROVAL_SIGNING_SECRET: ${MCP_APPROVAL_SIGNING_SECRET:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      HERMES_LLM_PROVIDER: ${HERMES_LLM_PROVIDER:-openai}
+      HERMES_MODEL: ${HERMES_MODEL:-gpt-4.1-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      NOUS_API_KEY: ${NOUS_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      HERMES_STT_PROVIDER: ${HERMES_STT_PROVIDER:-openai}
+      HERMES_STT_MODEL: ${HERMES_STT_MODEL:-whisper-1}
+    volumes:
+      - hermes_data:/opt/data
+      - ./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro
+      - ./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro
+      - ./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro
     depends_on:
-      - api
+      hermes_init:
+        condition: service_completed_successfully
+      mcp:
+        condition: service_started
     networks:
       - app_edge
-    read_only: true
-    tmpfs:
-      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     security_opt:
       - no-new-privileges:true
     deploy:
       resources:
         limits:
-          cpus: "0.75"
-          memory: 512M
+          cpus: "1.50"
+          memory: 1536M
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -189,3 +235,4 @@ networks:
 
 volumes:
   postgres_data:
+  hermes_data:
