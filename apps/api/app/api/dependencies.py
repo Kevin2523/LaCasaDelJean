@@ -1,34 +1,20 @@
-"""FastAPI dependencies: DB session, request ID, and fail-closed write guard.
-
-Issue #6 (Auth & RBAC) Integration Point
-----------------------------------------
-Every mutating route (catalog admin & inventory movements) depends on
-``require_write_access`` (which returns an ``AuthenticatedActor``).
-
-Until Issue #6 lands JWT verification and RBAC role enforcement:
-- ``require_write_access`` is **fail-closed**: it always raises
-  ``UnauthorizedError`` (HTTP 401, ``UNAUTHORIZED``).
-- Automated tests override ``require_write_access`` via
-  ``app.dependency_overrides[require_write_access]``.
-- When Issue #6 is implemented, replace the body of ``require_write_access``
-  (or chain it to ``get_current_active_user``) to:
-  1. Validate the Bearer JWT access token.
-  2. Load the active ``User`` and ``Role`` from PostgreSQL.
-  3. Enforce ``role.name in {"admin", "operator"}`` (raising ``ForbiddenError``
-     HTTP 403 if the actor is e.g. ``viewer``).
-  4. Return ``AuthenticatedActor(user_id=user.id, role=user.role.name, email=user.email)``.
-"""
+"""FastAPI dependencies: DB session, request ID, JWT authentication, and RBAC guards."""
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.services.errors import UnauthorizedError
+from app.core.config import Settings, get_settings
+from app.services import auth as auth_service
+from app.services.errors import ForbiddenError, UnauthorizedError
+
+WRITE_ROLES = frozenset({"admin", "operator"})
+ADMIN_ROLES = frozenset({"admin"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +24,17 @@ class AuthenticatedActor:
     user_id: uuid.UUID | None
     role: str
     email: str | None = None
+    session_id: uuid.UUID | None = None
 
 
 def get_request_id(request: Request) -> str | None:
     """Return the request correlation ID attached by RequestID middleware."""
     return getattr(request.state, "request_id", None)
+
+
+def get_app_settings(request: Request) -> Settings:
+    """Return Settings attached to the app (or default cached Settings)."""
+    return getattr(request.app.state, "settings", None) or get_settings()
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:
@@ -56,13 +48,69 @@ def get_db(request: Request) -> Generator[Session, None, None]:
             raise
 
 
-def require_write_access() -> AuthenticatedActor:
-    """Fail-closed guard for all write/admin/inventory routes until Issue #6 lands."""
-    raise UnauthorizedError(
-        "Authentication required for write operations. "
-        "Integrate Issue #6 JWT/RBAC provider in app.api.dependencies.require_write_access.",
-        details={"auth_integration": "issue_6_pending"},
+def _extract_bearer_token(request: Request) -> str:
+    header = request.headers.get("Authorization")
+    if not header:
+        raise UnauthorizedError("Se requiere token de autenticación Bearer.")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise UnauthorizedError("Formato de cabecera Authorization inválido.")
+    return token.strip()
+
+
+def get_current_active_user(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> AuthenticatedActor:
+    """Validate Bearer JWT + active DB session and return AuthenticatedActor."""
+    token = _extract_bearer_token(request)
+    auth_session, user = auth_service.resolve_session_and_user(db, token, settings=settings)
+    return AuthenticatedActor(
+        user_id=user.id,
+        role=user.role.name,
+        email=user.email,
+        session_id=auth_session.id,
     )
+
+
+def require_roles(*allowed_roles: str) -> Callable[[AuthenticatedActor], AuthenticatedActor]:
+    """Build a FastAPI dependency that enforces membership in allowed_roles."""
+    allowed = frozenset(allowed_roles)
+
+    def _guard(actor: AuthenticatedActor = Depends(get_current_active_user)) -> AuthenticatedActor:
+        if actor.role not in allowed:
+            raise ForbiddenError(
+                "El rol actual no tiene permisos para realizar esta operación.",
+                details={"required_roles": sorted(allowed), "actual_role": actor.role},
+            )
+        return actor
+
+    return _guard
+
+
+def require_write_access(
+    actor: AuthenticatedActor = Depends(get_current_active_user),
+) -> AuthenticatedActor:
+    """Enforce server-side write access for catalog admin and inventory routes."""
+    if actor.role not in WRITE_ROLES:
+        raise ForbiddenError(
+            "El rol actual no tiene permisos de escritura.",
+            details={"required_roles": sorted(WRITE_ROLES), "actual_role": actor.role},
+        )
+    return actor
+
+
+def require_admin_access(
+    actor: AuthenticatedActor = Depends(get_current_active_user),
+) -> AuthenticatedActor:
+    """Enforce server-side admin-only access (e.g. audit trail inspection)."""
+    if actor.role not in ADMIN_ROLES:
+        raise ForbiddenError(
+            "Se requiere rol de administrador para esta operación.",
+            details={"required_roles": sorted(ADMIN_ROLES), "actual_role": actor.role},
+        )
+    return actor
 
 
 DbSession = Depends(get_db)
