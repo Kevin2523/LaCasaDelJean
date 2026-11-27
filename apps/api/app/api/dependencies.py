@@ -13,6 +13,7 @@ from app.core.config import Settings, get_settings
 from app.services import auth as auth_service
 from app.services.errors import ForbiddenError, UnauthorizedError
 
+READ_ROLES = frozenset({"admin", "operator", "viewer"})
 WRITE_ROLES = frozenset({"admin", "operator"})
 ADMIN_ROLES = frozenset({"admin"})
 
@@ -87,6 +88,18 @@ def require_roles(*allowed_roles: str) -> Callable[[AuthenticatedActor], Authent
         return actor
 
     return _guard
+
+
+def require_read_access(
+    actor: AuthenticatedActor = Depends(get_current_active_user),
+) -> AuthenticatedActor:
+    """Enforce server-side read access for admin panel (admin, operator, viewer)."""
+    if actor.role not in READ_ROLES:
+        raise ForbiddenError(
+            "El rol actual no tiene permisos de lectura administrativa.",
+            details={"required_roles": sorted(READ_ROLES), "actual_role": actor.role},
+        )
+    return actor
 
 
 def require_write_access(

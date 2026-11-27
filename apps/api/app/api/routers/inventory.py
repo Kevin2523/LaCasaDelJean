@@ -15,6 +15,7 @@ from app.api.dependencies import (
     AuthenticatedActor,
     get_db,
     get_request_id,
+    require_read_access,
     require_write_access,
 )
 from app.schemas.common import PaginatedResponse
@@ -54,7 +55,7 @@ def create_stock_movement(
 @router.get("/variants/{variant_id}/balance", response_model=StockBalanceOut)
 def get_variant_balance(
     variant_id: uuid.UUID,
-    _actor: AuthenticatedActor = Depends(require_write_access),
+    _actor: AuthenticatedActor = Depends(require_read_access),
     db: Session = Depends(get_db),
 ) -> StockBalanceOut:
     """Return current stock balance for a variant (persists at quantity = 0)."""
@@ -69,7 +70,7 @@ def list_variant_movements(
     variant_id: uuid.UUID,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    _actor: AuthenticatedActor = Depends(require_write_access),
+    _actor: AuthenticatedActor = Depends(require_read_access),
     db: Session = Depends(get_db),
 ) -> PaginatedResponse[StockMovementOut]:
     """Return paginated append-only stock movement history for a variant."""

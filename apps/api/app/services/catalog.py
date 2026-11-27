@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import math
 import uuid
 from decimal import Decimal
+from pathlib import Path
+
+from PIL import Image as PilImage, UnidentifiedImageError
 
 from sqlalchemy import asc, desc, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -950,3 +955,220 @@ def delete_image_metadata(
     )
     session.delete(image)
     session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Admin Catalog Queries & Safe Photograph Upload (Issue #9)
+# ---------------------------------------------------------------------------
+
+ALLOWED_UPLOAD_MIME_TYPES: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def list_admin_categories(
+    session: Session,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    search: str | None = None,
+    is_active: bool | None = None,
+) -> PaginatedResponse[CategorySummary]:
+    """List all categories (including inactive) for the admin panel."""
+    stmt = select(Category)
+    if is_active is not None:
+        stmt = stmt.where(Category.is_active.is_(is_active))
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(or_(Category.name.ilike(pattern), Category.slug.ilike(pattern)))
+
+    total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = session.scalars(
+        stmt.order_by(asc(Category.display_order), asc(Category.name))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    return PaginatedResponse(
+        items=[CategorySummary.model_validate(c) for c in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=_total_pages(total, page_size),
+    )
+
+
+def list_admin_products(
+    session: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    category_id: uuid.UUID | None = None,
+    publication_status: PublicationStatus | None = None,
+    search: str | None = None,
+) -> PaginatedResponse[ProductListItem]:
+    """List all products (draft, published, archived) for the admin panel."""
+    stmt = select(Product).join(Category, Product.category_id == Category.id)
+    if category_id is not None:
+        stmt = stmt.where(Product.category_id == category_id)
+    if publication_status is not None:
+        stmt = stmt.where(Product.publication_status == publication_status.value)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Product.name.ilike(pattern),
+                Product.sku.ilike(pattern),
+                Product.slug.ilike(pattern),
+            )
+        )
+
+    total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    products = session.scalars(
+        stmt.options(
+            selectinload(Product.category),
+            selectinload(Product.variants),
+            selectinload(Product.prices),
+            selectinload(Product.images),
+        )
+        .order_by(desc(Product.updated_at), desc(Product.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    all_variant_ids = [v.id for p in products for v in p.variants]
+    balances_by_variant: dict[uuid.UUID, StockBalance] = {}
+    if all_variant_ids:
+        b_rows = session.scalars(
+            select(StockBalance).where(StockBalance.variant_id.in_(all_variant_ids))
+        ).all()
+        balances_by_variant = {b.variant_id: b for b in b_rows}
+
+    published = PublicationStatus.PUBLISHED.value
+    items: list[ProductListItem] = []
+    for p in products:
+        pub_variants = [v for v in p.variants if v.publication_status == published]
+        available_stock = 0
+        for v in p.variants:
+            bal = balances_by_variant.get(v.id)
+            if bal is not None:
+                available_stock += max(bal.quantity - bal.reserved_quantity, 0)
+
+        primary_img: ImageOut | None = None
+        if p.images:
+            ordered = sorted(p.images, key=lambda i: (not i.is_primary, i.display_order, i.created_at))
+            primary_img = ImageOut.model_validate(ordered[0])
+
+        items.append(
+            ProductListItem(
+                id=p.id,
+                category_id=p.category_id,
+                category_name=p.category.name,
+                category_slug=p.category.slug,
+                sku=p.sku,
+                name=p.name,
+                slug=p.slug,
+                description=p.description,
+                publication_status=PublicationStatus(p.publication_status),
+                published_at=p.published_at,
+                current_price=_select_current_product_price(p.prices),
+                primary_image=primary_img,
+                available_stock=available_stock,
+                in_stock=available_stock > 0,
+                published_variant_count=len(pub_variants),
+                created_at=p.created_at,
+                updated_at=p.updated_at,
+            )
+        )
+
+    return PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=_total_pages(total, page_size),
+    )
+
+
+def upload_product_image(
+    session: Session,
+    product_id: uuid.UUID,
+    *,
+    content: bytes,
+    original_filename: str,
+    content_type: str | None,
+    media_root: str,
+    variant_id: uuid.UUID | None = None,
+    alt_text: str | None = None,
+    display_order: int = 0,
+    is_primary: bool = False,
+    actor_user_id: uuid.UUID | None = None,
+    request_id: str | None = None,
+) -> ImageOut:
+    """Safely validate, persist to local media_root, and register a product photograph."""
+    product = session.get(Product, product_id)
+    if product is None:
+        raise ResourceNotFoundError(f"Product {product_id} not found.")
+
+    if not content:
+        raise DomainValidationError("El archivo de imagen está vacío.")
+    if len(content) > MAX_IMAGE_UPLOAD_BYTES:
+        raise DomainValidationError("La imagen excede el tamaño máximo permitido de 5 MB.")
+
+    normalized_mime = (content_type or "").lower().strip()
+    if normalized_mime not in ALLOWED_UPLOAD_MIME_TYPES:
+        raise DomainValidationError(
+            "Formato de imagen no soportado. Usa JPEG, PNG o WebP."
+        )
+
+    try:
+        with PilImage.open(io.BytesIO(content)) as img:
+            img.verify()
+        with PilImage.open(io.BytesIO(content)) as img:
+            width, height = img.size
+            pil_format = (img.format or "").upper()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise DomainValidationError("El archivo cargado no es una imagen válida.") from exc
+
+    format_to_mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+    detected_mime = format_to_mime.get(pil_format)
+    if detected_mime is None:
+        raise DomainValidationError("Formato binario de imagen no permitido (solo JPEG, PNG o WebP).")
+
+    ext = ALLOWED_UPLOAD_MIME_TYPES[detected_mime]
+    sha256 = hashlib.sha256(content).hexdigest()
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    relative_path = f"products/{product_id}/{safe_name}"
+
+    root_path = Path(media_root).resolve()
+    target_path = (root_path / "products" / str(product_id) / safe_name).resolve()
+    if root_path not in target_path.parents:
+        raise DomainValidationError("Ruta de almacenamiento inválida.")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(content)
+
+    safe_original = Path(original_filename or safe_name).name[:255] or safe_name
+    payload = ImageCreate(
+        variant_id=variant_id,
+        storage_path=relative_path,
+        original_filename=safe_original,
+        mime_type=detected_mime,
+        size_bytes=len(content),
+        width=width,
+        height=height,
+        sha256=sha256,
+        alt_text=alt_text,
+        display_order=display_order,
+        is_primary=is_primary,
+    )
+    return create_image_metadata(
+        session,
+        product_id,
+        payload,
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+    )

@@ -1,8 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { routes } from './app.routes';
 import { API_BASE_URL, WHATSAPP_NUMBER, resolveApiBaseUrl, resolveWhatsappNumber } from './core/config/api-config';
+import { authInterceptor } from './core/interceptors/auth.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -11,7 +12,7 @@ export const appConfig: ApplicationConfig = {
       routes,
       withInMemoryScrolling({ scrollPositionRestoration: 'enabled' })
     ),
-    provideHttpClient(),
+    provideHttpClient(withInterceptors([authInterceptor])),
     {
       provide: API_BASE_URL,
       useFactory: resolveApiBaseUrl,
