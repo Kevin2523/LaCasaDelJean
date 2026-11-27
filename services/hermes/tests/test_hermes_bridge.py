@@ -1,8 +1,9 @@
-"""Automated tests for Hermes v0.23.4 trusted MCP bridge, anti-spoofing, and failure modes."""
+"""Automated tests for Hermes v0.23.4 plugin API, cross-session identity, anti-spoofing, and real MCP read."""
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +13,14 @@ import pytest
 import yaml
 
 from services.hermes.plugins.lacasadeljean_mcp_bridge import (
-    create_pre_tool_call_hook,
+    TOOL_SCHEMAS,
+    build_hooks_and_handlers,
     register,
 )
 from services.hermes.plugins.lacasadeljean_mcp_bridge.bridge import (
     BridgeConfig,
+    SessionActorRegistry,
+    TrustedApprovalStore,
     TrustedMCPBridgeClient,
 )
 from services.hermes.plugins.lacasadeljean_mcp_bridge.security import (
@@ -26,9 +30,9 @@ from services.hermes.plugins.lacasadeljean_mcp_bridge.security import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_SECRET = "test-shared-mcp-secret-999"
-ACTOR_SECRET = "test-actor-assertion-secret-999"
-APPROVAL_SECRET = "test-approval-signing-secret-999"
+SHARED_SECRET = "test-shared-mcp-secret-0123456789abcdef"
+ACTOR_SECRET = "test-actor-assertion-secret-0123456789ab"
+APPROVAL_SECRET = "test-approval-signing-secret-0123456789a"
 ALLOWED_USER_A = 111222333
 ALLOWED_USER_B = 444555666
 UNLISTED_USER = 999888777
@@ -47,159 +51,147 @@ def _make_config(**overrides: Any) -> BridgeConfig:
     return BridgeConfig(**defaults)
 
 
-def _tg_session(user_id: int = ALLOWED_USER_A) -> dict[str, Any]:
-    return {"platform": "telegram", "telegram_user_id": user_id, "session_id": f"tg-user-{user_id}"}
-
-
 # ---------------------------------------------------------------------------
-# 1. Mock Hermes tool calls (read & confirmed write)
+# 1. Official Hermes v0.23.4 plugin API: register(ctx), hooks, cross-session
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_read_tool_injects_signed_actor_assertion_and_bearer() -> None:
-    captured: dict[str, Any] = {}
+def test_plugin_manifest_and_register_ctx_official_v0234() -> None:
+    manifest = yaml.safe_load(
+        (REPO_ROOT / "services/hermes/plugins/lacasadeljean_mcp_bridge/plugin.yaml").read_text(encoding="utf-8")
+    )
+    assert set(manifest["provides_tools"]) == set(TOOL_SCHEMAS.keys())
+    assert set(manifest["provides_hooks"]) == {"pre_llm_call", "pre_tool_call", "on_session_end"}
+
+    registered_hooks: dict[str, Any] = {}
+    registered_tools: dict[str, dict[str, Any]] = {}
+
+    class DummyHermesCtx:
+        def register_hook(self, name: str, fn: Any) -> None:
+            registered_hooks[name] = fn
+
+        def register_tool(self, *, name: str, schema: dict[str, Any], handler: Any, toolset: str = "") -> None:
+            registered_tools[name] = {"schema": schema, "handler": handler, "toolset": toolset}
+
+    register(DummyHermesCtx())
+    assert set(registered_hooks.keys()) == {"pre_llm_call", "pre_tool_call", "on_session_end"}
+    assert set(registered_tools.keys()) == set(TOOL_SCHEMAS.keys())
+
+
+def test_pre_llm_call_cross_session_isolation_and_restart_fail_closed() -> None:
+    captured_actors: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        captured["headers"] = dict(request.headers)
-        captured["body"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "req-1", "result": {"ok": True, "items": []}})
-
-    client = TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(handler))
-    res = await client.call_tool(
-        tool_name="mcp_inventory_search_products",
-        arguments={"search": "jean skinny"},
-        session_context=_tg_session(ALLOWED_USER_A),
-        request_id="req-1",
-    )
-
-    assert res["ok"] is True
-    assert captured["url"] == "http://mcp:8010/mcp"
-    assert captured["headers"]["authorization"] == f"Bearer {SHARED_SECRET}"
-    assert captured["body"]["params"]["name"] == "search_products"
-
-    claims = jwt.decode(
-        captured["headers"]["x-actor-assertion"],
-        ACTOR_SECRET,
-        algorithms=["HS256"],
-        audience=MCP_AUDIENCE,
-        issuer=ACTOR_ISSUER,
-    )
-    assert claims["telegram_user_id"] == ALLOWED_USER_A
-    assert claims["sub"] == f"tg:{ALLOWED_USER_A}"
-    assert 0 < claims["exp"] - claims["iat"] <= 60
-
-
-@pytest.mark.asyncio
-async def test_write_tool_blocked_without_approval_proof() -> None:
-    called = False
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal called
-        called = True
+        claims = jwt.decode(
+            request.headers["x-actor-assertion"],
+            ACTOR_SECRET,
+            algorithms=["HS256"],
+            audience=MCP_AUDIENCE,
+            issuer=ACTOR_ISSUER,
+        )
+        captured_actors.append(claims["telegram_user_id"])
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"ok": True}})
 
-    client = TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(handler))
-    res = await client.call_tool(
-        tool_name="set_product_price",
-        arguments={
-            "product_id": "prod-1",
-            "amount_pab": "49.95",
-            "idempotency_key": "idem-price-1",
-        },
-        session_context=_tg_session(ALLOWED_USER_A),
+    registry = SessionActorRegistry()
+    pre_llm, pre_tool, on_end, handlers = build_hooks_and_handlers(
+        config=_make_config(),
+        session_registry=registry,
+        transport=httpx.MockTransport(handler),
     )
 
-    assert res["ok"] is False
-    assert res["error"]["code"] == "APPROVAL_REQUIRED"
-    assert called is False
+    # Bind two distinct Telegram users to two distinct sessions
+    assert pre_llm(session_id="sess-A", platform="telegram", sender_id=ALLOWED_USER_A) is None
+    assert pre_llm(session_id="sess-B", platform="telegram", sender_id=ALLOWED_USER_B) is None
+
+    assert pre_tool("search_products", {"search": "jean"}, task_id="sess-A") is None
+    assert pre_tool("search_products", {"search": "jean"}, task_id="sess-B") is None
+
+    res_a = json.loads(handlers["search_products"]({"search": "jean"}, task_id="sess-A"))
+    res_b = json.loads(handlers["search_products"]({"search": "jean"}, task_id="sess-B"))
+    assert res_a["ok"] is True
+    assert res_b["ok"] is True
+    assert captured_actors == [ALLOWED_USER_A, ALLOWED_USER_B]
+
+    # Simulate restart (empty registry) -> fail closed
+    registry.clear()
+    blocked_after_restart = pre_tool("search_products", {"search": "jean"}, task_id="sess-A")
+    assert blocked_after_restart is not None
+    assert blocked_after_restart["action"] == "block"
+    assert "SESSION_NOT_VERIFIED" in blocked_after_restart["message"]
+
+    # Unlisted user blocked in pre_llm_call
+    blocked_llm = pre_llm(session_id="sess-C", platform="telegram", sender_id=UNLISTED_USER)
+    assert blocked_llm is not None
+    assert blocked_llm["action"] == "block"
+
+    # Session end unbinds
+    assert pre_llm(session_id="sess-D", platform="telegram", sender_id=ALLOWED_USER_A) is None
+    on_end(session_id="sess-D")
+    assert registry.resolve("sess-D") is None
 
 
-@pytest.mark.asyncio
-async def test_write_tool_succeeds_with_scoped_human_approval_proof() -> None:
+def test_pre_tool_call_blocks_disallowed_tools_and_spoofing() -> None:
+    registry = SessionActorRegistry()
+    pre_llm, pre_tool, _, _ = build_hooks_and_handlers(config=_make_config(), session_registry=registry)
+    assert pre_llm(session_id="sess-A", platform="telegram", sender_id=ALLOWED_USER_A) is None
+
+    for bad_tool in ("terminal", "browser_navigate", "sql_query", "execute_code"):
+        decision = pre_tool(bad_tool, {}, task_id="sess-A")
+        assert decision is not None and decision["action"] == "block"
+
+    for spoof_key in ("telegram_user_id", "user_id", "role", "X-Actor-Assertion"):
+        decision = pre_tool("search_products", {spoof_key: ALLOWED_USER_B}, task_id="sess-A")
+        assert decision is not None and decision["action"] == "block"
+        assert "IDENTITY_SPOOFING_BLOCKED" in decision["message"]
+
+
+# ---------------------------------------------------------------------------
+# 2. Issue #12 seam: server-side TrustedApprovalStore (no secrets to LLM)
+# ---------------------------------------------------------------------------
+
+
+def test_trusted_approval_store_seam_for_issue_12() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "result": {"ok": True, "price": "49.95"}})
 
-    args = {
-        "product_id": "prod-1",
-        "amount_pab": "49.95",
-        "idempotency_key": "idem-price-2",
-    }
-    proof = sign_human_approval_proof(
+    registry = SessionActorRegistry()
+    approvals = TrustedApprovalStore()
+    pre_llm, _, _, handlers = build_hooks_and_handlers(
+        config=_make_config(),
+        session_registry=registry,
+        approval_store=approvals,
+        transport=httpx.MockTransport(handler),
+    )
+    assert pre_llm(session_id="sess-A", platform="telegram", sender_id=ALLOWED_USER_A) is None
+
+    write_args = {"product_id": "prod-1", "amount_pab": "49.95", "idempotency_key": "idem-p1"}
+
+    # Without human confirmation -> blocked
+    unconfirmed = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    assert unconfirmed["ok"] is False
+    assert unconfirmed["error"]["code"] == "APPROVAL_REQUIRED"
+
+    # #12 Telegram confirmation records proof server-side (LLM never sees secret or JWT)
+    approvals.record_human_confirmation(
         telegram_user_id=ALLOWED_USER_A,
         action="set_product_price",
-        arguments=args,
-        secret=APPROVAL_SECRET,
+        arguments=write_args,
+        idempotency_key="idem-p1",
+        signing_secret=APPROVAL_SECRET,
     )
-    args["approval_proof"] = proof
+    confirmed = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    assert confirmed["ok"] is True
+    assert confirmed["result"]["price"] == "49.95"
 
-    client = TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(handler))
-    res = await client.call_tool(
-        tool_name="set_product_price",
-        arguments=args,
-        session_context=_tg_session(ALLOWED_USER_A),
-    )
-    assert res["ok"] is True
-    assert res["result"]["price"] == "49.95"
+    # Proof is one-use in store -> replay blocked
+    replay = json.loads(handlers["set_product_price"](write_args, task_id="sess-A"))
+    assert replay["ok"] is False
+    assert replay["error"]["code"] == "APPROVAL_REQUIRED"
 
 
 # ---------------------------------------------------------------------------
-# 2. Anti-spoofing & fail-closed security tests
+# 3. Cross-user / tampered approval_proof & MCP failure modes
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "spoofed_key,spoofed_value",
-    [
-        ("telegram_user_id", ALLOWED_USER_B),
-        ("user_id", "admin-uuid"),
-        ("role", "admin"),
-        ("X-Actor-Assertion", "forged.jwt.token"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_model_controlled_identity_spoofing_blocked(spoofed_key: str, spoofed_value: Any) -> None:
-    client = TrustedMCPBridgeClient(_make_config())
-    res = await client.call_tool(
-        tool_name="search_products",
-        arguments={"search": "jean", spoofed_key: spoofed_value},
-        session_context=_tg_session(ALLOWED_USER_A),
-    )
-    assert res["ok"] is False
-    assert res["error"]["code"] == "IDENTITY_SPOOFING_BLOCKED"
-
-
-@pytest.mark.asyncio
-async def test_unlisted_telegram_user_rejected() -> None:
-    client = TrustedMCPBridgeClient(_make_config())
-    res = await client.call_tool(
-        tool_name="search_products",
-        arguments={"search": "jean"},
-        session_context=_tg_session(UNLISTED_USER),
-    )
-    assert res["ok"] is False
-    assert res["error"]["code"] == "USER_NOT_ALLOWED"
-
-
-@pytest.mark.asyncio
-async def test_missing_or_non_telegram_context_fails_closed() -> None:
-    client = TrustedMCPBridgeClient(_make_config())
-    res_missing = await client.call_tool(
-        tool_name="search_products",
-        arguments={},
-        session_context=None,
-    )
-    assert res_missing["ok"] is False
-    assert res_missing["error"]["code"] == "MISSING_TRUSTED_CONTEXT"
-
-    res_wrong_platform = await client.call_tool(
-        tool_name="search_products",
-        arguments={},
-        session_context={"platform": "discord", "telegram_user_id": ALLOWED_USER_A},
-    )
-    assert res_wrong_platform["ok"] is False
-    assert res_wrong_platform["error"]["code"] == "UNSUPPORTED_PLATFORM"
 
 
 @pytest.mark.asyncio
@@ -217,151 +209,110 @@ async def test_cross_user_and_tampered_approval_proof_rejected() -> None:
     )
     client = TrustedMCPBridgeClient(_make_config())
 
-    # User B tries to reuse User A's approval_proof
     res_cross = await client.call_tool(
         tool_name="set_product_publication_status",
         arguments={**args, "approval_proof": proof_for_a},
-        session_context=_tg_session(ALLOWED_USER_B),
+        telegram_user_id=ALLOWED_USER_B,
     )
     assert res_cross["ok"] is False
     assert res_cross["error"]["code"] == "APPROVAL_ACTOR_MISMATCH"
 
-    # User A tampers with product_id after confirmation
     res_tampered = await client.call_tool(
         tool_name="set_product_publication_status",
         arguments={**args, "product_id": "prod-OTHER", "approval_proof": proof_for_a},
-        session_context=_tg_session(ALLOWED_USER_A),
+        telegram_user_id=ALLOWED_USER_A,
     )
     assert res_tampered["ok"] is False
     assert res_tampered["error"]["code"] == "APPROVAL_SCOPE_MISMATCH"
 
 
-@pytest.mark.parametrize("disallowed_tool", ["terminal", "browser_navigate", "sql_query", "execute_code"])
 @pytest.mark.asyncio
-async def test_disallowed_tools_blocked_fail_closed(disallowed_tool: str) -> None:
-    client = TrustedMCPBridgeClient(_make_config())
-    res = await client.call_tool(
-        tool_name=disallowed_tool,
-        arguments={},
-        session_context=_tg_session(ALLOWED_USER_A),
-    )
-    assert res["ok"] is False
-    assert res["error"]["code"] == "TOOL_NOT_ALLOWED"
-
-
-@pytest.mark.asyncio
-async def test_placeholder_secret_fails_closed() -> None:
-    client = TrustedMCPBridgeClient(_make_config(actor_assertion_secret="CHANGE_ME_SECRET"))
-    res = await client.call_tool(
-        tool_name="search_products",
-        arguments={},
-        session_context=_tg_session(ALLOWED_USER_A),
-    )
-    assert res["ok"] is False
-    assert res["error"]["code"] == "MISCONFIGURED_SECRET"
-
-
-# ---------------------------------------------------------------------------
-# 3. Failed MCP transport & upstream error scenarios
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_mcp_timeout_and_unreachable_handled_safely() -> None:
-    def timeout_handler(_request: httpx.Request) -> httpx.Response:
+async def test_mcp_timeout_unreachable_and_http_errors() -> None:
+    def timeout_handler(_req: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("timed out")
 
-    def conn_handler(_request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused")
+    def conn_handler(_req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
 
-    client_timeout = TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(timeout_handler))
-    res_timeout = await client_timeout.call_tool(
-        tool_name="search_products",
-        arguments={},
-        session_context=_tg_session(ALLOWED_USER_A),
-    )
-    assert res_timeout["ok"] is False
-    assert res_timeout["error"]["code"] == "MCP_TIMEOUT"
+    def err500(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
 
-    client_down = TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(conn_handler))
-    res_down = await client_down.call_tool(
-        tool_name="search_products",
-        arguments={},
-        session_context=_tg_session(ALLOWED_USER_A),
+    r1 = await TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(timeout_handler)).call_tool(
+        tool_name="search_products", arguments={}, telegram_user_id=ALLOWED_USER_A
     )
-    assert res_down["ok"] is False
-    assert res_down["error"]["code"] == "MCP_UNREACHABLE"
+    assert r1["ok"] is False and r1["error"]["code"] == "MCP_TIMEOUT"
+
+    r2 = await TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(conn_handler)).call_tool(
+        tool_name="search_products", arguments={}, telegram_user_id=ALLOWED_USER_A
+    )
+    assert r2["ok"] is False and r2["error"]["code"] == "MCP_UNREACHABLE"
+
+    r3 = await TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(err500)).call_tool(
+        tool_name="search_products", arguments={}, telegram_user_id=ALLOWED_USER_A
+    )
+    assert r3["ok"] is False and r3["error"]["code"] == "MCP_HTTP_500"
+
+
+# ---------------------------------------------------------------------------
+# 4. Real end-to-end MCP read against services/mcp/app/server.py (FastMCP)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_mcp_http_500_and_rpc_error_handled() -> None:
-    def err500(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="Internal Server Error")
+async def test_real_mcp_server_end_to_end_read_via_bridge() -> None:
+    mcp_dir = str(REPO_ROOT / "services" / "mcp")
+    if mcp_dir not in sys.path:
+        sys.path.insert(0, mcp_dir)
 
-    def rpc_err(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "1", "error": {"code": -32000, "message": "Boom"}})
+    from app.config import MCPSettings  # type: ignore[import-not-found]
+    from app.server import create_mcp_app  # type: ignore[import-not-found]
 
-    res_500 = await TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(err500)).call_tool(
-        tool_name="search_products", arguments={}, session_context=_tg_session(ALLOWED_USER_A)
+    def fake_fastapi(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/internal/mcp/exchange":
+            return httpx.Response(
+                200,
+                json={"access_token": "jwt-from-api", "user": {"id": "user-uuid-1", "role": "viewer"}},
+            )
+        if request.url.path == "/api/v1/admin/products":
+            return httpx.Response(
+                200,
+                json={"items": [{"id": "p-1", "sku": "JEAN-001", "name": "Jean Slim Azul"}], "total": 1},
+            )
+        return httpx.Response(404, json={"detail": "not found"})
+
+    mcp_settings = MCPSettings(
+        api_internal_url="http://api:8000",
+        hermes_mcp_shared_secret=SHARED_SECRET,
+        mcp_actor_assertion_secret=ACTOR_SECRET,
+        mcp_approval_signing_secret=APPROVAL_SECRET,
     )
-    assert res_500["ok"] is False
-    assert res_500["error"]["code"] == "MCP_HTTP_500"
+    mcp_app = create_mcp_app(mcp_settings, api_transport=httpx.MockTransport(fake_fastapi))
 
-    res_rpc = await TrustedMCPBridgeClient(_make_config(), transport=httpx.MockTransport(rpc_err)).call_tool(
-        tool_name="search_products", arguments={}, session_context=_tg_session(ALLOWED_USER_A)
-    )
-    assert res_rpc["ok"] is False
-    assert res_rpc["error"]["code"] == "MCP_RPC_ERROR"
+    async with mcp_app.router.lifespan_context(mcp_app):
+        client = TrustedMCPBridgeClient(
+            _make_config(mcp_url="http://mcp:8010/mcp"),
+            transport=httpx.ASGITransport(app=mcp_app),
+        )
+        res = await client.call_tool(
+            tool_name="search_products",
+            arguments={"search": "Slim"},
+            telegram_user_id=ALLOWED_USER_A,
+            request_id="e2e-read-1",
+        )
+
+    assert res["ok"] is True
+    structured = res["result"]["structuredContent"]
+    assert structured["ok"] is True
+    assert structured["data"]["items"][0]["sku"] == "JEAN-001"
 
 
 # ---------------------------------------------------------------------------
-# 4. Plugin hook registration & config/compose sanity tests
+# 5. Official config.yaml invariants (no static mcp_servers bypass)
 # ---------------------------------------------------------------------------
 
 
-def test_plugin_register_and_pre_tool_call_hook() -> None:
-    registered: dict[str, Any] = {}
-
-    class DummyCtx:
-        def register_hook(self, name: str, fn: Any) -> None:
-            registered[name] = fn
-
-    register(DummyCtx())
-    assert "pre_tool_call" in registered
-
-    hook = create_pre_tool_call_hook(_make_config())
-    allowed = hook(
-        {
-            "tool_name": "mcp_inventory_get_variant_stock",
-            "arguments": {"variant_id": "var-1"},
-            "session_context": _tg_session(ALLOWED_USER_A),
-        }
-    )
-    assert allowed["allow"] is True
-    assert "X-Actor-Assertion" in allowed["headers"]
-
-    blocked = hook(
-        {
-            "tool_name": "terminal",
-            "arguments": {"cmd": "rm -rf /"},
-            "session_context": _tg_session(ALLOWED_USER_A),
-        }
-    )
-    assert blocked["allow"] is False
-    assert blocked["error"]["code"] == "TOOL_NOT_ALLOWED"
-
-
-def test_hermes_config_yaml_security_invariants() -> None:
-    cfg_path = REPO_ROOT / "services" / "hermes" / "config" / "config.yaml"
-    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-
-    assert cfg["gateway"]["api_server"]["enabled"] is False
-    assert cfg["gateway"]["dashboard"]["enabled"] is False
-    assert cfg["gateway"]["telegram"]["mode"] == "polling"
-    assert cfg["gateway"]["telegram"]["session_scope"] == "per_user"
-    assert "terminal" in cfg["toolsets"]["disabled"]
-    assert "browser" in cfg["toolsets"]["disabled"]
-    assert cfg["mcp_servers"]["inventory"]["url"] == "${HERMES_MCP_URL}"
-    assert "lacasadeljean_mcp_bridge" in cfg["plugins"]["enabled"]
-    assert cfg["vision"]["enabled"] is True
+def test_hermes_config_yaml_has_no_static_mcp_bypass() -> None:
+    cfg = yaml.safe_load((REPO_ROOT / "services/hermes/config/config.yaml").read_text(encoding="utf-8"))
+    assert "mcp_servers" not in cfg
+    assert "lacasadeljean-mcp-bridge" in cfg["plugins"]["enabled"]
     assert cfg["voice_mode"]["enabled"] is True

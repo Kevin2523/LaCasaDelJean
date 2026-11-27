@@ -98,6 +98,7 @@ services:
     container_name: lcdj_mcp
     profiles:
       - mcp
+      - hermes
     restart: unless-stopped
     env_file:
       - path: .env

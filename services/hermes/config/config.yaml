@@ -1,55 +1,31 @@
 # ==============================================================================
-# Hermes Agent v0.23.4 - Configuración interna para La Casa del Jean V2
+# Hermes Agent v0.23.4 - Configuración oficial para La Casa del Jean V2
 # Montado en /opt/data/config.yaml (solo lectura). Sin secretos en texto plano.
+# Solo usa claves documentadas de Hermes v0.23.4 (cli-config.yaml.example).
+#
+# NOTA DE SEGURIDAD:
+# No se configura `mcp_servers` estático porque no soporta X-Actor-Assertion
+# por usuario de Telegram en cada llamada. Todas las operaciones de inventario
+# pasan exclusivamente por el plugin confiable `lacasadeljean-mcp-bridge`.
 # ==============================================================================
+
+database:
+  journal_mode: "wal"
+
+runtime:
+  nofile_soft_limit: 4096
+  malloc_arena_max: 4
 
 model:
   provider: "${HERMES_LLM_PROVIDER}"
-  name: "${HERMES_MODEL}"
-  max_tokens: 2048
-  temperature: 0.2
+  default: "${HERMES_MODEL}"
 
-# Límites de contexto y costo para servidor 8 GB RAM (Ryzen 3)
 agent:
   max_turns: 12
-  max_tool_calls_per_turn: 6
-  context_compression: true
-  soul_file: "/opt/data/SOUL.md"
 
-# Gateway Telegram: un solo bot, long polling saliente, sin puertos publicados
-gateway:
-  api_server:
-    enabled: false
-  dashboard:
-    enabled: false
-  telegram:
-    enabled: true
-    mode: "polling"
-    session_scope: "per_user"
-    allowed_users_env: "TELEGRAM_ALLOWED_USERS"
-    allow_groups: false
-
-# Herramientas integradas: deshabilitar terminal, navegador, archivos y SQL directo
-toolsets:
-  enabled:
-    - "vision"
-    - "mcp"
-  disabled:
-    - "terminal"
-    - "browser"
-    - "file"
-    - "web"
-    - "code_execution"
-    - "cron"
-
-# Soporte de fotos (visión nativa de Hermes)
-vision:
-  enabled: true
-  max_image_size_mb: 10
-
-# Soporte de notas de voz (STT integrado de Hermes; sin servicio Whisper separado)
-# Por defecto usa proveedor hospedado (openai/groq). Solo cambiar a faster-whisper
-# (modelo tiny/base) si los recursos del servidor Ryzen 3 8 GB RAM lo permiten.
+# STT integrado en Hermes (sin servicio Whisper separado).
+# Por defecto proveedor hospedado (openai/groq); faster-whisper solo si el
+# operador lo elige y los recursos del servidor Ryzen 3 8 GB RAM lo permiten.
 voice_mode:
   enabled: true
   stt:
@@ -59,28 +35,8 @@ voice_mode:
   tts:
     enabled: false
 
-# Servidor MCP privado de inventario (red interna app_edge, sin puerto público)
-mcp_servers:
-  inventory:
-    enabled: true
-    transport: "streamable_http"
-    url: "${HERMES_MCP_URL}"
-    timeout: 30
-    headers:
-      Authorization: "Bearer ${HERMES_MCP_SHARED_SECRET}"
-    allowed_tools:
-      - "search_products"
-      - "get_product_detail"
-      - "get_variant_stock"
-      - "create_product_draft"
-      - "create_variant"
-      - "attach_product_photo"
-      - "set_product_price"
-      - "record_stock_movement"
-      - "set_product_publication_status"
-
-# Plugin confiable de puente MCP: inyecta X-Actor-Assertion por usuario Telegram
-# y exige approval_proof firmado y acotado para toda escritura (fail-closed).
+# Plugin confiable de puente MCP (registra las 9 herramientas de inventario y
+# los hooks pre_llm_call / pre_tool_call / on_session_end en modo fail-closed).
 plugins:
   enabled:
-    - "lacasadeljean_mcp_bridge"
+    - "lacasadeljean-mcp-bridge"

@@ -41,15 +41,18 @@ Este documento describe la integración oficial de **NousResearch Hermes Agent (
 
 ---
 
-## 4. Seguridad MCP y Plugin Confiable (`lacasadeljean_mcp_bridge`)
+## 4. Seguridad MCP y Plugin Confiable (`lacasadeljean-mcp-bridge`)
 
-La configuración nativa de `mcp_servers` en Hermes solo soporta cabeceras estáticas (`Authorization: Bearer ${HERMES_MCP_SHARED_SECRET}`). Por ello, el plugin confiable `services/hermes/plugins/lacasadeljean_mcp_bridge` intercepta `pre_tool_call` en modo **fail-closed**:
+La configuración nativa `mcp_servers` de Hermes únicamente admite cabeceras HTTP estáticas y el hook `pre_tool_call(tool_name, args, task_id, **kwargs)` solo retorna `{"action": "block", "message": "..."}` o `{"action": "modify", "args": {...}}` (no inyecta cabeceras HTTP ni recibe `sender_id`). Por ello:
 
-1. **Lista blanca estricta de herramientas:** Solo permite las 9 herramientas del MCP de inventario (`search_products`, `get_product_detail`, `get_variant_stock`, `create_product_draft`, `create_variant`, `attach_product_photo`, `set_product_price`, `record_stock_movement`, `set_product_publication_status`). Bloquea terminal, SQL directo, archivos y navegador.
-2. **Anti-spoofing de identidad:** Rechaza inmediatamente cualquier llamada en la que el modelo intente pasar `telegram_user_id`, `user_id`, `actor_id`, `role` o `X-Actor-Assertion` como argumento.
-3. **Aserción firmada por llamada (`X-Actor-Assertion`):** Extrae el `telegram_user_id` numérico exclusivamente del contexto verificado de la sesión Telegram, valida pertenencia a `TELEGRAM_ALLOWED_USERS` y firma un JWT HS256 de corta duración (`30s`, `jti` único) con `MCP_ACTOR_ASSERTION_SECRET`.
-4. **Confirmación explícita (`approval_proof`) en toda escritura:** Valida localmente (y `services/mcp` vuelve a validar y consumir de forma duradera en PostgreSQL) que exista un `approval_proof` firmado con `MCP_APPROVAL_SIGNING_SECRET`, acotado al `telegram_user_id`, `action` y `payload_sha256` exactos, junto con `idempotency_key` obligatorio.
-5. **Instrucciones (`SOUL.md`):** Exigen propuesta/vista previa estructurada en **PAB (Balboa)** y prohíben publicar o mutar sin confirmación explícita del operador.
+- **Sin `mcp_servers` estático en `config.yaml`:** Se elimina cualquier definición estática de `mcp_servers` para impedir que el modelo eluda el puente confiable.
+- **Plugin oficial v0.23.4 (`services/hermes/plugins/lacasadeljean_mcp_bridge`):**
+  1. **`plugin.yaml`:** Declara `provides_tools` (las 9 herramientas de inventario) y `provides_hooks` (`pre_llm_call`, `pre_tool_call`, `on_session_end`).
+  2. **`pre_llm_call(session_id, user_message, is_first_turn, model, platform, **kwargs)`:** Extrae `platform == "telegram"` y `sender_id` numérico del contexto confiable del gateway, valida pertenencia a `TELEGRAM_ALLOWED_USERS` y vincula `session_id` / `conversation_id` en `SessionActorRegistry`. Si falta o no está autorizado, bloquea el turno (`{"action": "block", "message": "..."}`). Tras un reinicio o en una sesión sin vinculación previa, `SessionActorRegistry` arranca vacío (**fail-closed**).
+  3. **`pre_tool_call(tool_name, args, task_id, **kwargs)`:** Bloquea cualquier herramienta fuera de las 9 autorizadas, cualquier intento de spoofing de argumentos (`telegram_user_id`, `user_id`, `role`, `X-Actor-Assertion`) y cualquier sesión no verificada.
+  4. **`ctx.register_tool(...)` + `TrustedMCPBridgeClient`:** Expone las 9 herramientas de inventario directamente al agente; en cada llamada firma un `X-Actor-Assertion` HS256 de corta duración (`30s`, `jti` único) con `MCP_ACTOR_ASSERTION_SECRET` y llama a `http://mcp:8010/mcp` con `Authorization: Bearer <HERMES_MCP_SHARED_SECRET>`.
+  5. **Ruta de aprobación para #12 sin exponer secretos al modelo (`TrustedApprovalStore`):** Las escrituras exigen `idempotency_key` y un `approval_proof` firmado y acotado (`telegram_user_id`, `action`, `payload_sha256`). El plugin expone `TrustedApprovalStore.record_human_confirmation(...)` para que el flujo de confirmación de Telegram en #12 registre la aprobación del lado servidor sin exponer jamás `MCP_APPROVAL_SIGNING_SECRET` ni el JWT al LLM.
+  6. **Instrucciones (`SOUL.md`):** Exigen propuesta/vista previa estructurada en **PAB (Balboa)** y prohíben publicar o mutar sin confirmación explícita del operador.
 
 ---
 

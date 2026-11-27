@@ -1,8 +1,9 @@
-"""Trusted Hermes plugin hook & MCP Streamable HTTP bridge client."""
+"""Trusted Hermes v0.23.4 session registry, approval store (#12 seam), and MCP bridge client."""
 
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +18,7 @@ from .security import (
     parse_allowed_telegram_users,
     require_secret,
     sign_actor_assertion,
+    sign_human_approval_proof,
     verify_approval_proof_local,
 )
 
@@ -45,8 +47,87 @@ class BridgeConfig:
         )
 
 
+class SessionActorRegistry:
+    """Thread-safe, fail-closed map of Hermes session/conversation IDs -> verified Telegram user ID.
+
+    Populated strictly by `pre_llm_call` from trusted gateway metadata (`platform`, `sender_id`).
+    Starts empty on process restart so any unverified or resumed session without a fresh
+    `pre_llm_call` binding fails closed.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._bindings: dict[str, int] = {}
+
+    def bind(self, *, session_id: str | None, conversation_id: str | None, telegram_user_id: int) -> None:
+        with self._lock:
+            if session_id:
+                self._bindings[session_id] = telegram_user_id
+            if conversation_id:
+                self._bindings[conversation_id] = telegram_user_id
+
+    def unbind(self, *, session_id: str | None = None, conversation_id: str | None = None) -> None:
+        with self._lock:
+            if session_id:
+                self._bindings.pop(session_id, None)
+            if conversation_id:
+                self._bindings.pop(conversation_id, None)
+
+    def resolve(self, *keys: str | None) -> int | None:
+        with self._lock:
+            for key in keys:
+                if key and key in self._bindings:
+                    return self._bindings[key]
+        return None
+
+    def clear(self) -> None:
+        with self._lock:
+            self._bindings.clear()
+
+
+class TrustedApprovalStore:
+    """In-process seam for Issue #12 Telegram confirmation flow.
+
+    Allows #12's trusted Telegram callback handler to mint and store a scoped,
+    short-lived `approval_proof` keyed by `(telegram_user_id, action, idempotency_key)`
+    WITHOUT ever exposing `MCP_APPROVAL_SIGNING_SECRET` or the raw JWT to the LLM.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._proofs: dict[tuple[int, str, str], str] = {}
+
+    def record_human_confirmation(
+        self,
+        *,
+        telegram_user_id: int,
+        action: str,
+        arguments: dict[str, Any],
+        idempotency_key: str,
+        signing_secret: str,
+        ttl_seconds: int = 60,
+    ) -> None:
+        proof = sign_human_approval_proof(
+            telegram_user_id=telegram_user_id,
+            action=action,
+            arguments=arguments,
+            secret=signing_secret,
+            ttl_seconds=ttl_seconds,
+        )
+        with self._lock:
+            self._proofs[(telegram_user_id, action, idempotency_key.strip())] = proof
+
+    def pop_proof(self, *, telegram_user_id: int, action: str, idempotency_key: str) -> str | None:
+        with self._lock:
+            return self._proofs.pop((telegram_user_id, action, idempotency_key.strip()), None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._proofs.clear()
+
+
 def normalize_tool_name(raw_tool_name: str) -> str:
-    """Strip Hermes MCP namespace prefix (e.g. 'mcp_inventory_search_products' -> 'search_products')."""
+    """Strip any namespace prefix (e.g. 'mcp_inventory_search_products' -> 'search_products')."""
     name = (raw_tool_name or "").strip()
     for prefix in ("mcp_inventory_", "inventory:", "inventory."):
         if name.startswith(prefix):
@@ -54,51 +135,48 @@ def normalize_tool_name(raw_tool_name: str) -> str:
     return name
 
 
-def extract_verified_telegram_user_id(session_context: dict[str, Any] | None) -> int:
-    """Extract verified numeric Telegram user ID strictly from trusted gateway context.
-
-    Never reads from model-controlled tool arguments.
-    """
-    if not isinstance(session_context, dict):
-        raise BridgeSecurityError(
-            "MISSING_TRUSTED_CONTEXT",
-            "No existe contexto verificado de sesión Telegram.",
-        )
-
-    platform = str(session_context.get("platform") or "").strip().lower()
-    if platform != "telegram":
+def parse_verified_telegram_sender(*, platform: str | None, sender_id: Any) -> int:
+    """Validate trusted gateway platform and numeric sender_id (fail-closed)."""
+    plat = str(platform or "").strip().lower()
+    if plat != "telegram":
         raise BridgeSecurityError(
             "UNSUPPORTED_PLATFORM",
-            f"Plataforma no autorizada para herramientas de inventario: {platform!r}",
+            f"Plataforma no autorizada para herramientas de inventario: {plat!r}",
         )
-
-    raw_uid = session_context.get("telegram_user_id")
-    if isinstance(raw_uid, bool) or raw_uid is None:
-        raise BridgeSecurityError("INVALID_ACTOR_ID", "Falta telegram_user_id verificado en la sesión.")
-
-    if isinstance(raw_uid, int):
-        uid = raw_uid
-    elif isinstance(raw_uid, str) and raw_uid.strip().isdigit():
-        uid = int(raw_uid.strip())
+    if isinstance(sender_id, bool) or sender_id is None:
+        raise BridgeSecurityError("INVALID_ACTOR_ID", "Falta sender_id verificado de Telegram.")
+    if isinstance(sender_id, int):
+        uid = sender_id
+    elif isinstance(sender_id, str) and sender_id.strip().isdigit():
+        uid = int(sender_id.strip())
     else:
-        raise BridgeSecurityError("INVALID_ACTOR_ID", "telegram_user_id de sesión no es numérico.")
-
+        raise BridgeSecurityError("INVALID_ACTOR_ID", "sender_id de Telegram no es numérico.")
     if uid <= 0:
-        raise BridgeSecurityError("INVALID_ACTOR_ID", "telegram_user_id debe ser positivo.")
+        raise BridgeSecurityError("INVALID_ACTOR_ID", "sender_id de Telegram debe ser positivo.")
     return uid
+
+
+def check_no_spoofed_arguments(arguments: dict[str, Any] | None) -> dict[str, Any]:
+    """Reject any model-supplied identity or auth argument."""
+    args = dict(arguments or {})
+    spoofed = [k for k in args if k in FORBIDDEN_MODEL_ARGUMENTS or k.lower() in FORBIDDEN_MODEL_ARGUMENTS]
+    if spoofed:
+        raise BridgeSecurityError(
+            "IDENTITY_SPOOFING_BLOCKED",
+            f"El modelo no puede suministrar argumentos de identidad/autenticación: {', '.join(sorted(spoofed))}",
+        )
+    return args
 
 
 def validate_tool_invocation(
     *,
     tool_name: str,
     arguments: dict[str, Any] | None,
-    session_context: dict[str, Any] | None,
+    telegram_user_id: int | None,
     config: BridgeConfig,
+    approval_store: TrustedApprovalStore | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
-    """Fail-closed validation for every Hermes pre_tool_call event.
-
-    Returns (canonical_tool_name, verified_telegram_user_id, sanitized_arguments).
-    """
+    """Fail-closed validation for every inventory tool call."""
     canonical_tool = normalize_tool_name(tool_name)
     if canonical_tool not in ALLOWED_MCP_TOOLS:
         raise BridgeSecurityError(
@@ -106,15 +184,14 @@ def validate_tool_invocation(
             f"La herramienta '{tool_name}' no está en la lista blanca de inventario.",
         )
 
-    args = dict(arguments or {})
-    spoofed_keys = [k for k in args if k in FORBIDDEN_MODEL_ARGUMENTS or k.lower() in FORBIDDEN_MODEL_ARGUMENTS]
-    if spoofed_keys:
+    args = check_no_spoofed_arguments(arguments)
+
+    if telegram_user_id is None or isinstance(telegram_user_id, bool) or telegram_user_id <= 0:
         raise BridgeSecurityError(
-            "IDENTITY_SPOOFING_BLOCKED",
-            f"El modelo no puede suministrar argumentos de identidad/autenticación: {', '.join(sorted(spoofed_keys))}",
+            "SESSION_NOT_VERIFIED",
+            "No existe identidad Telegram verificada para esta sesión (fail-closed).",
         )
 
-    telegram_user_id = extract_verified_telegram_user_id(session_context)
     if not config.allowed_telegram_users:
         raise BridgeSecurityError(
             "EMPTY_ALLOWLIST",
@@ -126,7 +203,6 @@ def validate_tool_invocation(
             f"El usuario de Telegram {telegram_user_id} no está autorizado en TELEGRAM_ALLOWED_USERS.",
         )
 
-    # All write tools require idempotency_key and a valid, scoped, human-confirmed approval_proof.
     if canonical_tool in WRITE_TOOLS:
         idem = str(args.get("idempotency_key") or "").strip()
         if not idem:
@@ -134,8 +210,19 @@ def validate_tool_invocation(
                 "IDEMPOTENCY_KEY_REQUIRED",
                 f"idempotency_key es obligatorio para la escritura '{canonical_tool}'.",
             )
+        # Prefer trusted server-side approval store (#12 seam) so secrets/JWTs never touch the LLM.
+        proof = args.get("approval_proof")
+        if not proof and approval_store is not None:
+            proof = approval_store.pop_proof(
+                telegram_user_id=telegram_user_id,
+                action=canonical_tool,
+                idempotency_key=idem,
+            )
+            if proof:
+                args["approval_proof"] = proof
+
         verify_approval_proof_local(
-            args.get("approval_proof"),
+            proof,
             secret=config.approval_signing_secret,
             expected_telegram_user_id=telegram_user_id,
             expected_action=canonical_tool,
@@ -153,9 +240,11 @@ class TrustedMCPBridgeClient:
         config: BridgeConfig,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        approval_store: TrustedApprovalStore | None = None,
     ) -> None:
         self.config = config
         self._transport = transport
+        self._approval_store = approval_store
 
     def build_headers(self, *, telegram_user_id: int, request_id: str | None = None) -> dict[str, str]:
         """Build per-call Bearer + signed X-Actor-Assertion headers."""
@@ -178,18 +267,19 @@ class TrustedMCPBridgeClient:
         *,
         tool_name: str,
         arguments: dict[str, Any] | None,
-        session_context: dict[str, Any] | None,
+        telegram_user_id: int | None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         """Validate fail-closed, sign per-user X-Actor-Assertion, and invoke private MCP HTTP."""
         try:
-            canonical_tool, telegram_user_id, clean_args = validate_tool_invocation(
+            canonical_tool, verified_uid, clean_args = validate_tool_invocation(
                 tool_name=tool_name,
                 arguments=arguments,
-                session_context=session_context,
+                telegram_user_id=telegram_user_id,
                 config=self.config,
+                approval_store=self._approval_store,
             )
-            headers = self.build_headers(telegram_user_id=telegram_user_id, request_id=request_id)
+            headers = self.build_headers(telegram_user_id=verified_uid, request_id=request_id)
         except BridgeSecurityError as exc:
             return {"ok": False, "error": {"code": exc.code, "message": exc.message}}
 
