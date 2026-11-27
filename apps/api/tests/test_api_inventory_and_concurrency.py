@@ -8,17 +8,17 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
-from app.api.dependencies import AuthenticatedActor, require_write_access
+from app.api.dependencies import AuthenticatedActor, get_current_active_user
 from app.db.session import build_session_factory
 from app.main import create_app
 
 
-def _make_admin_client(engine: Engine) -> TestClient:
+def _make_admin_client(engine: Engine, *, role: str = "operator") -> TestClient:
     app = create_app(session_factory=build_session_factory(engine))
-    app.dependency_overrides[require_write_access] = lambda: AuthenticatedActor(
+    app.dependency_overrides[get_current_active_user] = lambda: AuthenticatedActor(
         user_id=None,
-        role="operator",
-        email="ops@lacasadeljean.local",
+        role=role,
+        email=f"{role}@lacasadeljean.local",
     )
     return TestClient(app)
 
@@ -233,3 +233,48 @@ def test_concurrent_idempotent_replay_via_api(migrated_db: Engine) -> None:
     bal = setup_client.get(f"/api/v1/inventory/variants/{variant_id}/balance")
     assert bal.status_code == 200
     assert bal.json()["quantity"] == 3
+
+
+def test_inventory_read_permissions_viewer_and_anonymous(migrated_db: Engine) -> None:
+    operator_client = _make_admin_client(migrated_db, role="operator")
+    variant_id = _seed_variant_with_stock(operator_client, initial_qty=4)
+
+    # Anonymous client must be rejected with 401 on inventory reads and writes
+    anon_app = create_app(session_factory=build_session_factory(migrated_db))
+    anon_client = TestClient(anon_app)
+    assert anon_client.get(f"/api/v1/inventory/variants/{variant_id}/balance").status_code == 401
+    assert anon_client.get(f"/api/v1/inventory/variants/{variant_id}/movements").status_code == 401
+    assert (
+        anon_client.post(
+            "/api/v1/inventory/movements",
+            json={
+                "variant_id": variant_id,
+                "direction": "in",
+                "movement_type": "restock",
+                "quantity": 1,
+            },
+        ).status_code
+        == 401
+    )
+
+    # Viewer role can read balance and movement history, but cannot write movements (403)
+    viewer_client = _make_admin_client(migrated_db, role="viewer")
+    bal = viewer_client.get(f"/api/v1/inventory/variants/{variant_id}/balance")
+    assert bal.status_code == 200
+    assert bal.json()["quantity"] == 4
+
+    mov = viewer_client.get(f"/api/v1/inventory/variants/{variant_id}/movements")
+    assert mov.status_code == 200
+    assert mov.json()["total"] == 1
+
+    denied = viewer_client.post(
+        "/api/v1/inventory/movements",
+        json={
+            "variant_id": variant_id,
+            "direction": "in",
+            "movement_type": "restock",
+            "quantity": 1,
+        },
+    )
+    assert denied.status_code == 403
+
