@@ -18,7 +18,7 @@ import {
 import { AdminApiService } from '../../../core/services/admin-api.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { formatPab } from '../../../core/utils/format-pab';
-import { resolveCatalogImageUrl } from '../../../core/utils/media-placeholders';
+import { getPlaceholderPhoto, resolveCatalogImageUrl } from '../../../core/utils/media-placeholders';
 import { ConfirmDialogComponent } from '../components/confirm-dialog.component';
 
 type EditorTab = 'general' | 'pricing' | 'variants' | 'images';
@@ -565,6 +565,7 @@ type EditorTab = 'general' | 'pricing' | 'variants' | 'images';
                     <img
                       [src]="resolveImage(img, prod)"
                       [alt]="img.alt_text || prod.name"
+                      (error)="onImageError($event, prod)"
                       class="h-48 w-full object-cover"
                     />
                     <div class="space-y-2 p-3 text-xs">
@@ -1008,6 +1009,15 @@ export class AdminProductEditorPageComponent implements OnInit {
 
   resolveImage(img: ImageOut, prod: ProductDetail): string {
     return resolveCatalogImageUrl(img.storage_path, prod.slug || prod.category.slug);
+  }
+
+  onImageError(event: Event, prod: ProductDetail): void {
+    const img = event.target as HTMLImageElement | null;
+    if (!img || img.dataset['fallbackApplied']) {
+      return;
+    }
+    img.dataset['fallbackApplied'] = 'true';
+    img.src = getPlaceholderPhoto(prod.category.slug || prod.slug).url;
   }
 
   statusLabel(status: PublicationStatus): string {
