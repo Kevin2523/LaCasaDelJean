@@ -8,8 +8,8 @@ Este documento describe la integración oficial de **NousResearch Hermes Agent (
 
 - **Imagen oficial versionada:** `nousresearch/hermes-agent:v0.23.4` (configurable con `HERMES_IMAGE_TAG=v0.23.4`).
 - **Un solo contenedor gateway:** `lcdj_hermes` ejecutando `gateway run` en el perfil `hermes` de `docker-compose.yml`.
-- **Persistencia en `/opt/data`:** Volumen nombrado Linux `hermes_data:/opt/data` (almacena sesiones, memoria, credenciales OAuth `auth.json` y logs internos), con archivos de configuración montados en solo lectura:
-  - `./services/hermes/config/config.yaml:/opt/data/config.yaml:ro`
+- **Persistencia en `/opt/data`:** Volumen nombrado Linux `hermes_data:/opt/data` (almacena `config.yaml` escribible para migraciones `_config_version`, sesiones, memoria, credenciales OAuth `auth.json` y logs internos), con archivos de plantilla e instrucciones montados en solo lectura:
+  - `./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro` (se copia a `/opt/data/config.yaml` al inicializar para no bloquear migraciones de configuración con `EROFS`)
   - `./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro`
   - `./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro`
 - **Sin puertos publicados:** Ni el API server (`8642`) ni el dashboard de Hermes se exponen al host (`gateway.api_server.enabled: false`, `gateway.dashboard.enabled: false` y sin directiva `ports:` en `docker-compose.yml`).

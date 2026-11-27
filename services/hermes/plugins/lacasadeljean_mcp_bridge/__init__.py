@@ -248,21 +248,24 @@ def build_hooks_and_handlers(
         registry.unbind(session_id=session_id, conversation_id=conversation_id)
 
     def _make_tool_handler(tool_name: str):
-        def handler(args: dict[str, Any], task_id: str = "", **kwargs: Any) -> str:
-            session_id = str(kwargs.get("session_id") or "")
-            conversation_id = str(kwargs.get("conversation_id") or "")
+        def handler(
+            args: dict[str, Any],
+            task_id: str = "",
+            session_id: str = "",
+            conversation_id: str = "",
+            **kwargs: Any,
+        ) -> str:
+            del kwargs
             uid = registry.resolve(task_id, session_id, conversation_id)
             client = TrustedMCPBridgeClient(
                 _cfg(),
-                transport=transport,
+                sync_transport=transport,
                 approval_store=approvals,
             )
-            result = asyncio.run(
-                client.call_tool(
-                    tool_name=tool_name,
-                    arguments=args,
-                    telegram_user_id=uid,
-                )
+            result = client.call_tool_sync(
+                tool_name=tool_name,
+                arguments=args,
+                telegram_user_id=uid,
             )
             return json.dumps(result, ensure_ascii=False)
 

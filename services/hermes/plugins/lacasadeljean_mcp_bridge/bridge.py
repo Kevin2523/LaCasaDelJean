@@ -240,10 +240,12 @@ class TrustedMCPBridgeClient:
         config: BridgeConfig,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        sync_transport: httpx.BaseTransport | None = None,
         approval_store: TrustedApprovalStore | None = None,
     ) -> None:
         self.config = config
         self._transport = transport
+        self._sync_transport = sync_transport
         self._approval_store = approval_store
 
     def build_headers(self, *, telegram_user_id: int, request_id: str | None = None) -> dict[str, str]:
@@ -299,6 +301,95 @@ class TrustedMCPBridgeClient:
                 transport=self._transport,
             ) as client:
                 response = await client.post(
+                    self.config.mcp_url,
+                    json=rpc_body,
+                    headers=headers,
+                )
+        except httpx.TimeoutException:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "MCP_TIMEOUT",
+                    "message": "Tiempo de espera agotado al contactar el servidor MCP privado. No reintentes escrituras sin verificar el inventario.",
+                },
+            }
+        except httpx.HTTPError:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "MCP_UNREACHABLE",
+                    "message": "No fue posible conectar con el servidor MCP privado de inventario.",
+                },
+            }
+
+        if response.status_code >= 400:
+            return {
+                "ok": False,
+                "error": {
+                    "code": f"MCP_HTTP_{response.status_code}",
+                    "message": f"El servidor MCP rechazó la solicitud con HTTP {response.status_code}.",
+                },
+            }
+
+        try:
+            data = response.json()
+        except ValueError:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "MCP_INVALID_RESPONSE",
+                    "message": "El servidor MCP devolvió una respuesta no JSON.",
+                },
+            }
+
+        if "error" in data and data["error"]:
+            return {
+                "ok": False,
+                "error": {
+                    "code": "MCP_RPC_ERROR",
+                    "message": str(data["error"].get("message") or "Error RPC en servidor MCP."),
+                },
+            }
+
+        return {"ok": True, "result": data.get("result")}
+
+    def call_tool_sync(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+        telegram_user_id: int | None,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Synchronous variant using httpx.Client (never calls asyncio.run inside an active loop)."""
+        try:
+            canonical_tool, verified_uid, clean_args = validate_tool_invocation(
+                tool_name=tool_name,
+                arguments=arguments,
+                telegram_user_id=telegram_user_id,
+                config=self.config,
+                approval_store=self._approval_store,
+            )
+            headers = self.build_headers(telegram_user_id=verified_uid, request_id=request_id)
+        except BridgeSecurityError as exc:
+            return {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+
+        rpc_body = {
+            "jsonrpc": "2.0",
+            "id": request_id or str(uuid.uuid4()),
+            "method": "tools/call",
+            "params": {
+                "name": canonical_tool,
+                "arguments": clean_args,
+            },
+        }
+
+        try:
+            with httpx.Client(
+                timeout=self.config.timeout_seconds,
+                transport=self._sync_transport,
+            ) as client:
+                response = client.post(
                     self.config.mcp_url,
                     json=rpc_body,
                     headers=headers,

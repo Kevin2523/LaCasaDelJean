@@ -156,7 +156,7 @@ services:
       HERMES_STT_MODEL: ${HERMES_STT_MODEL:-whisper-1}
     volumes:
       - hermes_data:/opt/data
-      - ./services/hermes/config/config.yaml:/opt/data/config.yaml:ro
+      - ./services/hermes/config/config.yaml:/opt/data/config.template.yaml:ro
       - ./services/hermes/config/SOUL.md:/opt/data/SOUL.md:ro
       - ./services/hermes/plugins/lacasadeljean_mcp_bridge:/opt/data/plugins/lacasadeljean_mcp_bridge:ro
     depends_on:

@@ -1,6 +1,7 @@
 # ==============================================================================
-# Hermes Agent v0.23.4 - Configuración oficial para La Casa del Jean V2
-# Montado en /opt/data/config.yaml (solo lectura). Sin secretos en texto plano.
+# Hermes Agent v0.23.4 - Plantilla oficial de configuración (La Casa del Jean V2)
+# Montado en /opt/data/config.template.yaml:ro para copiar a /opt/data/config.yaml
+# (escribible en el volumen hermes_data para permitir migraciones _config_version).
 # Solo usa claves documentadas de Hermes v0.23.4 (cli-config.yaml.example).
 #
 # NOTA DE SEGURIDAD:
@@ -8,6 +9,8 @@
 # por usuario de Telegram en cada llamada. Todas las operaciones de inventario
 # pasan exclusivamente por el plugin confiable `lacasadeljean-mcp-bridge`.
 # ==============================================================================
+
+_config_version: 54
 
 database:
   journal_mode: "wal"
@@ -23,17 +26,15 @@ model:
 agent:
   max_turns: 12
 
-# STT integrado en Hermes (sin servicio Whisper separado).
-# Por defecto proveedor hospedado (openai/groq); faster-whisper solo si el
-# operador lo elige y los recursos del servidor Ryzen 3 8 GB RAM lo permiten.
-voice_mode:
+# STT integrado en Hermes v0.23.4 (sin servicio Whisper separado).
+# Por defecto proveedor hospedado (openai o groq); `local` (faster-whisper)
+# solo si el operador lo elige y los recursos del Ryzen 3 8 GB RAM lo permiten.
+stt:
   enabled: true
-  stt:
-    provider: "${HERMES_STT_PROVIDER}"
+  provider: "${HERMES_STT_PROVIDER}"
+  language: "es"
+  openai:
     model: "${HERMES_STT_MODEL}"
-    language: "es"
-  tts:
-    enabled: false
 
 # Plugin confiable de puente MCP (registra las 9 herramientas de inventario y
 # los hooks pre_llm_call / pre_tool_call / on_session_end en modo fail-closed).

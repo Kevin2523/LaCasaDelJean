@@ -307,12 +307,77 @@ async def test_real_mcp_server_end_to_end_read_via_bridge() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. Official config.yaml invariants (no static mcp_servers bypass)
+# 5. Upstream v0.23.4 tools/registry.py dispatch contract inside active event loop
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_registry_dispatch_contract_inside_running_event_loop() -> None:
+    """Reproduce NousResearch/hermes-agent v0.23.4 tools/registry.py dispatch() inside an active asyncio loop.
+
+    Verifies:
+    - `pre_llm_call(session_id, platform, sender_id)` binds the exact `session_id` passed to `handler`.
+    - Signature-inspected context kwargs (`task_id`, `session_id`, `conversation_id`, `user_task`) work.
+    - Handler executes synchronously via `httpx.Client` without calling `asyncio.run()` inside the loop.
+    """
+    import inspect
+
+    captured: dict[str, Any] = {}
+
+    def sync_mcp_handler(request: httpx.Request) -> httpx.Response:
+        claims = jwt.decode(
+            request.headers["x-actor-assertion"],
+            ACTOR_SECRET,
+            algorithms=["HS256"],
+            audience=MCP_AUDIENCE,
+            issuer=ACTOR_ISSUER,
+        )
+        captured["telegram_user_id"] = claims["telegram_user_id"]
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": "loop-1", "result": {"ok": True}})
+
+    registry = SessionActorRegistry()
+    pre_llm, pre_tool, _, handlers = build_hooks_and_handlers(
+        config=_make_config(),
+        session_registry=registry,
+        transport=httpx.MockTransport(sync_mcp_handler),
+    )
+
+    # 1. Gateway fires pre_llm_call with session_id + sender_id
+    assert pre_llm(session_id="tg-sess-99", conversation_id="tg-conv-99", platform="telegram", sender_id=ALLOWED_USER_A) is None
+
+    # 2. Policy hook pre_tool_call runs before dispatch
+    assert pre_tool("search_products", {"search": "cargo"}, task_id="tg-sess-99", session_id="tg-sess-99") is None
+
+    # 3. tools/registry.py dispatches with signature-inspected context kwargs inside an active event loop
+    handler = handlers["search_products"]
+    sig = inspect.signature(handler)
+    injected_kwargs = {
+        "task_id": "tg-sess-99",
+        "session_id": "tg-sess-99",
+        "conversation_id": "tg-conv-99",
+        "user_task": "busca jeans cargo",
+    }
+    accepted = (
+        injected_kwargs
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        else {k: v for k, v in injected_kwargs.items() if k in sig.parameters}
+    )
+    raw_result = handler({"search": "cargo"}, **accepted)
+    parsed = json.loads(raw_result)
+
+    assert parsed["ok"] is True
+    assert captured["telegram_user_id"] == ALLOWED_USER_A
+
+
+# ---------------------------------------------------------------------------
+# 6. Official config.yaml invariants (no static mcp_servers bypass, official stt:)
 # ---------------------------------------------------------------------------
 
 
 def test_hermes_config_yaml_has_no_static_mcp_bypass() -> None:
     cfg = yaml.safe_load((REPO_ROOT / "services/hermes/config/config.yaml").read_text(encoding="utf-8"))
     assert "mcp_servers" not in cfg
+    assert "voice_mode" not in cfg
+    assert cfg["_config_version"] == 54
+    assert cfg["stt"]["enabled"] is True
     assert "lacasadeljean-mcp-bridge" in cfg["plugins"]["enabled"]
-    assert cfg["voice_mode"]["enabled"] is True
