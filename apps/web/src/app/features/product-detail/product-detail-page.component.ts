@@ -1,11 +1,15 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
+import { Component, Inject, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { WHATSAPP_NUMBER } from '../../core/config/api-config';
 import { ProductDetail, VariantOut } from '../../core/models/catalog.models';
+import { INQUIRY_CART_MAX_QUANTITY } from '../../core/models/inquiry-cart.models';
 import { CatalogApiService } from '../../core/services/catalog-api.service';
+import { InquiryCartService } from '../../core/services/inquiry-cart.service';
 import { formatPab, getDiscountPercent } from '../../core/utils/format-pab';
 import { getPlaceholderPhoto, resolveCatalogImageUrl } from '../../core/utils/media-placeholders';
+import { buildWhatsappInquiryUrl } from '../../core/utils/whatsapp-link';
 import { StateBannerComponent } from '../../shared/components/state-banner/state-banner.component';
 
 interface GalleryItem {
@@ -209,6 +213,77 @@ interface GalleryItem {
               </div>
             }
 
+            <!-- Quantity & Inquiry Cart Actions -->
+            <div class="mt-7 space-y-4 border-t border-border pt-6">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <span class="text-xs font-semibold uppercase tracking-[0.12em] text-denim">
+                  Cantidad a consultar
+                </span>
+                <div class="inline-flex items-center rounded-xl border border-border-strong bg-white">
+                  <button
+                    type="button"
+                    (click)="decrementQuantity()"
+                    [disabled]="selectedQuantity() <= 1"
+                    aria-label="Disminuir cantidad"
+                    class="flex h-10 w-10 items-center justify-center text-base font-semibold text-denim transition-colors hover:bg-cream-warm disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    −
+                  </button>
+                  <span
+                    class="min-w-[2.5rem] text-center text-sm font-semibold text-ink"
+                    [attr.aria-label]="'Cantidad seleccionada: ' + selectedQuantity()"
+                  >
+                    {{ selectedQuantity() }}
+                  </span>
+                  <button
+                    type="button"
+                    (click)="incrementQuantity()"
+                    [disabled]="selectedQuantity() >= maxQuantity"
+                    aria-label="Aumentar cantidad"
+                    class="flex h-10 w-10 items-center justify-center text-base font-semibold text-denim transition-colors hover:bg-cream-warm disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  (click)="addToInquiryCart()"
+                  [disabled]="!canAddToCart()"
+                  class="inline-flex items-center justify-center gap-2 rounded-xl bg-denim px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-denim-deep disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Agregar a lista de consulta
+                </button>
+
+                <a
+                  [href]="directWhatsappUrl()"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1f8b4c] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#16773f]"
+                >
+                  Consultar por WhatsApp
+                </a>
+              </div>
+
+              @if (addedFeedback()) {
+                <div
+                  role="status"
+                  aria-live="polite"
+                  class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#166534]/20 bg-[#dcfce7] px-4 py-3 text-xs text-[#166534]"
+                >
+                  <span class="font-medium">{{ addedFeedback() }}</span>
+                  <a
+                    routerLink="/carrito"
+                    class="font-semibold underline hover:text-denim"
+                  >
+                    Ver lista de consulta ({{ cart.totalUnits() }}) →
+                  </a>
+                </div>
+              }
+            </div>
+
             <!-- Description -->
             <div class="mt-7 border-t border-border pt-6">
               <h2 class="text-xs font-semibold uppercase tracking-[0.14em] text-denim">
@@ -219,12 +294,12 @@ interface GalleryItem {
               </p>
             </div>
 
-            <!-- Public Catalog Notice (no cart/checkout in F2-01) -->
+            <!-- Public Catalog Inquiry Notice -->
             <div class="mt-6 rounded-2xl border border-border bg-surface p-4 text-xs leading-relaxed text-ink-secondary">
-              <p class="font-semibold text-denim">Consulta en tienda física</p>
+              <p class="font-semibold text-denim">Consulta en tienda física o por WhatsApp</p>
               <p class="mt-1">
-                Este catálogo público muestra precios en Balboas (B/.) y disponibilidad indicativa por variante.
-                No requiere cuenta de cliente ni realiza cobros en línea.
+                Este catálogo público muestra precios indicativos en Balboas (B/.) y disponibilidad referencial por variante.
+                No requiere cuenta de cliente, no reserva stock ni realiza cobros en línea.
               </p>
             </div>
 
@@ -250,6 +325,47 @@ export class ProductDetailPageComponent implements OnInit, OnDestroy {
   readonly selectedVariant = signal<VariantOut | null>(null);
   readonly selectedColor = signal<string>('');
   readonly selectedImageIndex = signal(0);
+  readonly selectedQuantity = signal(1);
+  readonly addedFeedback = signal<string | null>(null);
+  readonly maxQuantity = INQUIRY_CART_MAX_QUANTITY;
+
+  readonly canAddToCart = computed(() => {
+    const p = this.product();
+    if (!p) {
+      return false;
+    }
+    return p.variants.length === 0 || this.selectedVariant() !== null;
+  });
+
+  readonly directWhatsappUrl = computed(() => {
+    const p = this.product();
+    if (!p) {
+      return buildWhatsappInquiryUrl([], this.whatsappNumber);
+    }
+    const v = this.selectedVariant();
+    const price = this.activePrice();
+    const numericPrice =
+      price?.amount_pab !== undefined && price?.amount_pab !== null && price?.amount_pab !== ''
+        ? Number(price.amount_pab)
+        : null;
+    const item = {
+      key: `${p.id}::${v?.id ?? 'default'}`,
+      productId: p.id,
+      productSlug: p.slug,
+      productName: p.name,
+      categorySlug: p.category.slug,
+      sku: v?.sku || p.sku,
+      variantId: v?.id ?? null,
+      size: v?.size || 'Única',
+      color: v?.color || this.selectedColor() || '',
+      unitPricePab: numericPrice !== null && Number.isFinite(numericPrice) ? numericPrice : null,
+      currency: price?.currency || 'PAB',
+      quantity: this.selectedQuantity(),
+      imageUrl: this.activeImage().url,
+      imageAlt: this.activeImage().alt,
+    };
+    return buildWhatsappInquiryUrl([item], this.whatsappNumber);
+  });
 
   private currentSlug = '';
   private routeSub?: Subscription;
@@ -352,7 +468,9 @@ export class ProductDetailPageComponent implements OnInit, OnDestroy {
 
   constructor(
     private readonly route: ActivatedRoute,
-    private readonly catalogApi: CatalogApiService
+    private readonly catalogApi: CatalogApiService,
+    readonly cart: InquiryCartService,
+    @Inject(WHATSAPP_NUMBER) private readonly whatsappNumber: string
   ) {}
 
   ngOnInit(): void {
@@ -376,6 +494,8 @@ export class ProductDetailPageComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.errorMessage.set(null);
     this.selectedImageIndex.set(0);
+    this.selectedQuantity.set(1);
+    this.addedFeedback.set(null);
 
     this.catalogApi.getProductBySlug(this.currentSlug).subscribe({
       next: (detail) => {
@@ -402,6 +522,49 @@ export class ProductDetailPageComponent implements OnInit, OnDestroy {
 
   selectVariant(variant: VariantOut): void {
     this.selectedVariant.set(variant);
+    this.addedFeedback.set(null);
+  }
+
+  incrementQuantity(): void {
+    this.selectedQuantity.update((q) => Math.min(this.maxQuantity, q + 1));
+  }
+
+  decrementQuantity(): void {
+    this.selectedQuantity.update((q) => Math.max(1, q - 1));
+  }
+
+  addToInquiryCart(): void {
+    const p = this.product();
+    if (!p || !this.canAddToCart()) {
+      return;
+    }
+    const v = this.selectedVariant();
+    const price = this.activePrice();
+    const numericPrice =
+      price?.amount_pab !== undefined && price?.amount_pab !== null && price?.amount_pab !== ''
+        ? Number(price.amount_pab)
+        : null;
+    const sizeLabel = v?.size || 'Única';
+
+    this.cart.addItem({
+      productId: p.id,
+      productSlug: p.slug,
+      productName: p.name,
+      categorySlug: p.category.slug,
+      sku: v?.sku || p.sku,
+      variantId: v?.id ?? null,
+      size: sizeLabel,
+      color: v?.color || this.selectedColor() || '',
+      unitPricePab: numericPrice !== null && Number.isFinite(numericPrice) ? numericPrice : null,
+      currency: price?.currency || 'PAB',
+      quantity: this.selectedQuantity(),
+      imageUrl: this.activeImage().url,
+      imageAlt: this.activeImage().alt,
+    });
+
+    this.addedFeedback.set(
+      `Agregado: ${p.name} (Talla ${sizeLabel} × ${this.selectedQuantity()})`
+    );
   }
 
   onImageError(event: Event, product: ProductDetail): void {

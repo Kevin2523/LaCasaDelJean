@@ -22,6 +22,19 @@ export const routes: Routes = [
     title: 'Detalle de Producto — La Casa del Jean',
   },
   {
+    path: 'carrito',
+    loadComponent: () =>
+      import('./features/inquiry-cart/inquiry-cart-page.component').then(
+        (m) => m.InquiryCartPageComponent
+      ),
+    title: 'Lista de Consulta — La Casa del Jean',
+  },
+  {
+    path: 'consulta',
+    redirectTo: 'carrito',
+    pathMatch: 'full',
+  },
+  {
     path: '**',
     redirectTo: '',
   },
