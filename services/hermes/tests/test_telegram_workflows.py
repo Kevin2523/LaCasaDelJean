@@ -34,6 +34,7 @@ from services.hermes.plugins.lacasadeljean_mcp_bridge.bridge import (
     SessionActorRegistry,
     TrustedApprovalStore,
 )
+from services.hermes.plugins.lacasadeljean_mcp_bridge.media import MediaPolicyError, StagedPhotoRegistry
 from services.hermes.plugins.lacasadeljean_mcp_bridge.security import WRITE_TOOLS
 from services.hermes.plugins.lacasadeljean_mcp_bridge.workflows import ProposalWorkflowManager
 
@@ -450,10 +451,22 @@ def test_official_gateway_hooks_confirm_cancel_cross_user_restart_replay_and_rba
 # ---------------------------------------------------------------------------
 
 
-def test_photo_choices_through_proposal_tool_and_gateway_confirm() -> None:
+def test_photo_choices_through_proposal_tool_and_gateway_confirm(tmp_path: Path) -> None:
     backend = SimulatedFastAPIBackend()
     mcp_app = _make_mcp_app(backend)
     sample_b64 = _make_sample_jpeg_b64()
+    sample_bytes = base64.b64decode(sample_b64)
+
+    cache_dir = tmp_path / "cache" / "images"
+    cache_dir.mkdir(parents=True)
+    staged_file = cache_dir / "tg_photo_01.jpg"
+    staged_file.write_bytes(sample_bytes)
+
+    outside_file = tmp_path / "outside_secret.jpg"
+    outside_file.write_bytes(sample_bytes)
+
+    now_box = [time.time()]
+    staged_registry = StagedPhotoRegistry(allowed_roots=(cache_dir,), default_ttl_seconds=60)
 
     with TestClient(mcp_app) as tc:
         registry = SessionActorRegistry()
@@ -461,40 +474,109 @@ def test_photo_choices_through_proposal_tool_and_gateway_confirm() -> None:
             config=_make_bridge_config(),
             session_registry=registry,
             approval_store=TrustedApprovalStore(),
+            staged_photos=staged_registry,
             transport=SyncASGITransport(tc),
+            clock=lambda: now_box[0],
         )
-        assert pre_llm(session_id="tg:admin", platform="telegram", sender_id=ADMIN_TG_ID) is None
 
-        # A) Pillow optimization via propose_inventory_write -> CONFIRMAR via post_gateway_admission
+        # Hermes pre_llm_call receives `[Image attached at: <path>]` and stages it for ADMIN_TG_ID
+        admin_uuid = "550e8400-e29b-41d4-a716-446655440010"
+        assert (
+            pre_llm(
+                session_id=admin_uuid,
+                platform="telegram",
+                sender_id=ADMIN_TG_ID,
+                user_message=f"Sube esta foto al producto prod-1\n[Image attached at: {staged_file}]",
+            )
+            is None
+        )
+
+        # 1) LLM-supplied image_base64 or file_path is rejected fail-closed
+        untrusted = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1", "image_base64": sample_b64},
+                    "source_modality": "photo",
+                    "photo_choice": "pillow_optimize",
+                },
+                task_id=admin_uuid,
+            )
+        )
+        assert untrusted["ok"] is False
+        assert untrusted["error"]["code"] == "UNTRUSTED_IMAGE_INPUT"
+
+        # 2) Valid staged attachment -> Pillow optimization -> CONFIRMAR via post_gateway_admission
         opt_prop = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
                     "action": "attach_product_photo",
-                    "arguments": {
-                        "product_id": "prod-1",
-                        "image_base64": sample_b64,
-                        "filename": "jean.jpg",
-                        "content_type": "image/jpeg",
-                        "is_primary": True,
-                    },
+                    "arguments": {"product_id": "prod-1", "is_primary": True},
                     "source_modality": "photo",
                     "photo_choice": "pillow_optimize",
+                    "staged_attachment_id": "latest",
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         assert opt_prop["ok"] is True
-        assert "jean_opt.webp" in opt_prop["preview"]
+        assert "tg_photo_01_opt.webp" in opt_prop["preview"]
         resp = post_adm(
-            session_key="tg:admin",
+            session_key=f"agent:main:telegram:dm:{ADMIN_TG_ID}",
             platform="telegram",
-            source={"user_id": ADMIN_TG_ID},
+            source={"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
             text=f"CONFIRMAR {opt_prop['proposal_id']}",
         )
         assert "✅" in resp["reply"]
         assert len(backend.products["prod-1"]["photos"]) == 1
 
-        # B) exact_model_web_search without configured provider -> fail closed with clear code
+        # 3) Other operator cannot use Admin's staged attachment ID
+        op_uuid = "550e8400-e29b-41d4-a716-446655440011"
+        assert pre_llm(session_id=op_uuid, platform="telegram", sender_id=OPERATOR_TG_ID) is None
+        admin_att_id = next(iter(staged_registry._staged.keys()))
+        cross_att = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1"},
+                    "source_modality": "photo",
+                    "photo_choice": "original",
+                    "staged_attachment_id": admin_att_id,
+                },
+                task_id=op_uuid,
+            )
+        )
+        assert cross_att["ok"] is False
+        assert cross_att["error"]["code"] == "UNAUTHORIZED_ATTACHMENT"
+
+        # 4) Path traversal outside allowed cache dir fails closed
+        traversal_path = str(cache_dir / ".." / ".." / "outside_secret.jpg")
+        with pytest.raises(MediaPolicyError) as exc_trav:
+            staged_registry.stage_from_gateway_path(
+                raw_path=traversal_path,
+                telegram_user_id=ADMIN_TG_ID,
+                dm_session_id=f"telegram:dm:{ADMIN_TG_ID}",
+            )
+        assert exc_trav.value.code == "PATH_OUTSIDE_ALLOWED_CACHE"
+
+        # 5) Expired staged attachment fails closed
+        now_box[0] += 65
+        expired_att = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1"},
+                    "source_modality": "photo",
+                    "photo_choice": "original",
+                    "staged_attachment_id": admin_att_id,
+                },
+                task_id=admin_uuid,
+            )
+        )
+        assert expired_att["ok"] is False
+        assert expired_att["error"]["code"] == "ATTACHMENT_EXPIRED"
+
+        # 6) exact_model_web_search without configured provider -> fail closed
         no_provider = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
@@ -503,13 +585,13 @@ def test_photo_choices_through_proposal_tool_and_gateway_confirm() -> None:
                     "source_modality": "photo",
                     "photo_choice": "exact_model_web_search",
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         assert no_provider["ok"] is False
         assert no_provider["error"]["code"] == "EXTERNAL_SEARCH_PROVIDER_REQUIRED"
 
-        # C) exact_model_web_search with copyrighted candidate -> fail closed
+        # 7) exact_model_web_search with copyrighted candidate -> fail closed
         bad_license = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
@@ -532,7 +614,7 @@ def test_photo_choices_through_proposal_tool_and_gateway_confirm() -> None:
                         "image_base64": sample_b64,
                     },
                 },
-                task_id="tg:admin",
+                task_id=admin_uuid,
             )
         )
         assert bad_license["ok"] is False

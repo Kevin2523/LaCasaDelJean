@@ -38,6 +38,8 @@ from .bridge import (
 from .media import (
     ExternalImageCandidate,
     MediaPolicyError,
+    StagedPhotoRegistry,
+    extract_attached_image_paths,
     optimize_photo_with_pillow,
     prepare_original_photo,
     verify_and_prepare_external_product_image,
@@ -48,6 +50,7 @@ from .workflows import ProposalWorkflowManager, WorkflowError
 # Module-level registries (reset on restart -> fail-closed until fresh gateway/pre_llm_call).
 SESSION_ACTORS = SessionActorRegistry()
 APPROVAL_STORE = TrustedApprovalStore()
+STAGED_PHOTOS = StagedPhotoRegistry()
 
 PROPOSAL_TOOL_NAME = "propose_inventory_write"
 MODEL_EXPOSED_TOOLS: frozenset[str] = READ_ONLY_TOOLS | frozenset({PROPOSAL_TOOL_NAME})
@@ -113,6 +116,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "enum": ["original", "pillow_optimize", "exact_model_web_search"],
                 },
+                "staged_attachment_id": {
+                    "type": "string",
+                    "description": "ID opaco (att_...) o 'latest' del adjunto staged por el gateway (nunca pasar rutas ni image_base64).",
+                },
                 "external_image_candidate": {"type": "object"},
                 "expected_brand": {"type": "string"},
                 "expected_model": {"type": "string"},
@@ -124,13 +131,30 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 
-def _apply_photo_choice(args: dict[str, Any], proposal_args: dict[str, Any]) -> dict[str, Any]:
-    """Process operator photo choice via media.py before creating an attach_product_photo proposal."""
-    choice = args.get("photo_choice")
-    if not choice:
-        return proposal_args
+_UNTRUSTED_IMAGE_KEYS = frozenset({"image_base64", "file_path", "image_path", "path"})
 
+
+def _apply_photo_choice(
+    args: dict[str, Any],
+    proposal_args: dict[str, Any],
+    *,
+    staged_registry: StagedPhotoRegistry,
+    telegram_user_id: int,
+    dm_session_id: str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Process operator photo choice via media.py using ONLY trusted staged attachments (never LLM base64/path)."""
+    untrusted = [k for k in proposal_args if k in _UNTRUSTED_IMAGE_KEYS]
+    if untrusted:
+        raise MediaPolicyError(
+            "UNTRUSTED_IMAGE_INPUT",
+            f"El modelo no puede suministrar {', '.join(sorted(untrusted))}. "
+            "Usa staged_attachment_id de una foto adjunta en Telegram o exact_model_web_search.",
+        )
+
+    choice = args.get("photo_choice") or "original"
     updated = dict(proposal_args)
+
     if choice == "exact_model_web_search":
         cand_raw = args.get("external_image_candidate")
         if not isinstance(cand_raw, dict):
@@ -157,26 +181,32 @@ def _apply_photo_choice(args: dict[str, Any], proposal_args: dict[str, Any]) -> 
             expected_model=str(args.get("expected_model") or ""),
             expected_model_code=args.get("expected_model_code"),
         )
-    else:
-        raw_b64 = str(updated.get("image_base64") or "")
-        if not raw_b64:
-            raise MediaPolicyError("EMPTY_IMAGE", "Falta image_base64 para procesar la foto.")
-        img_bytes = base64.b64decode(raw_b64, validate=True)
-        filename = str(updated.get("filename") or "product.jpg")
-        content_type = str(updated.get("content_type") or "image/jpeg")
+    elif choice in ("original", "pillow_optimize"):
+        att_id = str(args.get("staged_attachment_id") or "").strip()
+        if not att_id:
+            raise MediaPolicyError(
+                "STAGED_ATTACHMENT_REQUIRED",
+                "Se requiere staged_attachment_id (ID opaco de foto adjunta en Telegram o 'latest').",
+            )
+        img_bytes, filename, content_type = staged_registry.resolve_staged_bytes(
+            attachment_id=att_id,
+            telegram_user_id=telegram_user_id,
+            dm_session_id=dm_session_id,
+            now=now,
+        )
         if choice == "original":
             prepared = prepare_original_photo(
                 image_bytes=img_bytes,
                 filename=filename,
                 content_type=content_type,
             )
-        elif choice == "pillow_optimize":
+        else:
             prepared = optimize_photo_with_pillow(
                 image_bytes=img_bytes,
                 filename=filename,
             )
-        else:
-            raise MediaPolicyError("INVALID_PHOTO_CHOICE", f"Opción de foto no soportada: {choice!r}")
+    else:
+        raise MediaPolicyError("INVALID_PHOTO_CHOICE", f"Opción de foto no soportada: {choice!r}")
 
     updated["image_base64"] = prepared.image_base64
     updated["filename"] = prepared.filename
@@ -213,12 +243,14 @@ def build_hooks_and_handlers(
     session_registry: SessionActorRegistry | None = None,
     approval_store: TrustedApprovalStore | None = None,
     workflow_manager: ProposalWorkflowManager | None = None,
+    staged_photos: StagedPhotoRegistry | None = None,
     transport: Any = None,
     clock: Any = None,
 ) -> tuple[Any, Any, Any, Any, dict[str, Any]]:
     """Construct official v0.23.4 hook callbacks and model-exposed tool handlers."""
     registry = session_registry if session_registry is not None else SESSION_ACTORS
     approvals = approval_store if approval_store is not None else APPROVAL_STORE
+    staged_registry = staged_photos if staged_photos is not None else STAGED_PHOTOS
 
     def _cfg() -> BridgeConfig:
         return config if config is not None else BridgeConfig.from_env()
@@ -339,7 +371,7 @@ def build_hooks_and_handlers(
         **kwargs: Any,
     ) -> dict[str, Any] | None:
         """Bind verified Telegram sender_id to session_id/conversation_id; fail closed."""
-        del user_message, is_first_turn, model
+        del is_first_turn, model
         conversation_id = str(kwargs.get("conversation_id") or kwargs.get("session_key") or "")
         sender_id = kwargs.get("sender_id")
         if sender_id is None:
@@ -358,6 +390,20 @@ def build_hooks_and_handlers(
             return {"action": "block", "message": f"[{exc.code}] {exc.message}"}
 
         registry.bind(session_id=session_id, conversation_id=conversation_id, telegram_user_id=uid)
+
+        # Stage any trusted Hermes-cached Telegram photo markers (`[Image attached at: <path>]`).
+        dm_session = _stable_dm_session(uid)
+        for raw_img_path in extract_attached_image_paths(user_message):
+            try:
+                staged_registry.stage_from_gateway_path(
+                    raw_path=raw_img_path,
+                    telegram_user_id=uid,
+                    dm_session_id=dm_session,
+                    now=_now(),
+                )
+            except MediaPolicyError:
+                # Invalid, symlink, or out-of-cache paths are never staged (fail-closed).
+                continue
         return None
 
     def on_pre_tool_call(
@@ -447,8 +493,15 @@ def build_hooks_and_handlers(
         modality = args.get("source_modality") or "text"
 
         try:
-            if normalize_tool_name(action) == "attach_product_photo" and args.get("photo_choice"):
-                proposal_args = _apply_photo_choice(args, proposal_args)
+            if normalize_tool_name(action) == "attach_product_photo":
+                proposal_args = _apply_photo_choice(
+                    args,
+                    proposal_args,
+                    staged_registry=staged_registry,
+                    telegram_user_id=uid,
+                    dm_session_id=effective_session,
+                    now=_now(),
+                )
             prop = wf.create_proposal(
                 telegram_user_id=uid,
                 session_id=effective_session,

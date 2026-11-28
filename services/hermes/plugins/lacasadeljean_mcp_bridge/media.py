@@ -12,8 +12,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
+import re
+import threading
+import time
+import uuid
 from dataclasses import dataclass
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
 
@@ -249,3 +255,200 @@ def verify_and_prepare_external_product_image(
         license_type=license_norm,
         source_attribution=f"{candidate.attribution.strip()} ({candidate.source_url.strip()})",
     )
+
+
+# ---------------------------------------------------------------------------
+# Trusted Telegram Photo Staging (Hermes v0.23.4 [Image attached at: <path>])
+# ---------------------------------------------------------------------------
+
+_IMAGE_ATTACHED_RE = re.compile(r"\[Image attached at:\s*([^\]]+)\]")
+_PILLOW_FORMAT_TO_CTYPE = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+
+
+def default_allowed_image_cache_dirs(env: dict[str, str] | None = None) -> tuple[Path, ...]:
+    """Return allowed Hermes image cache directories (default under HERMES_HOME=/opt/data)."""
+    src = env if env is not None else os.environ
+    raw_override = (src.get("HERMES_ALLOWED_IMAGE_CACHE_DIRS") or "").strip()
+    if raw_override:
+        return tuple(Path(p.strip()) for p in raw_override.split(os.pathsep) if p.strip())
+    hermes_home = Path((src.get("HERMES_HOME") or "/opt/data").strip())
+    return (
+        hermes_home / "cache" / "images",
+        hermes_home / "image_cache",
+        hermes_home / "native-inputs",
+    )
+
+
+def extract_attached_image_paths(user_message: Any) -> list[str]:
+    """Extract `[Image attached at: <path>]` markers from Hermes pre_llm_call user_message."""
+    texts: list[str] = []
+    if isinstance(user_message, str):
+        texts.append(user_message)
+    elif isinstance(user_message, list):
+        for part in user_message:
+            if isinstance(part, str):
+                texts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                texts.append(part["text"])
+    paths: list[str] = []
+    for txt in texts:
+        for match in _IMAGE_ATTACHED_RE.finditer(txt):
+            candidate = match.group(1).strip()
+            if candidate:
+                paths.append(candidate)
+    return paths
+
+
+@dataclass(frozen=True, slots=True)
+class StagedPhoto:
+    """Trusted server-side record of a Telegram photo cached by Hermes."""
+
+    attachment_id: str
+    telegram_user_id: int
+    dm_session_id: str
+    real_path: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    created_at: float
+    expires_at: float
+
+
+class StagedPhotoRegistry:
+    """Fail-closed registry binding Hermes-cached Telegram photos to `(uid, dm_session)` via opaque IDs."""
+
+    def __init__(
+        self,
+        *,
+        allowed_roots: tuple[Path, ...] | None = None,
+        max_bytes: int = 10 * 1024 * 1024,
+        default_ttl_seconds: int = 300,
+    ) -> None:
+        self._allowed_roots = allowed_roots
+        self._max_bytes = max_bytes
+        self._default_ttl_seconds = default_ttl_seconds
+        self._lock = threading.Lock()
+        self._staged: dict[str, StagedPhoto] = {}
+
+    def _roots(self) -> tuple[str, ...]:
+        roots = self._allowed_roots if self._allowed_roots is not None else default_allowed_image_cache_dirs()
+        return tuple(os.path.realpath(str(r)) for r in roots)
+
+    def _validate_path(self, raw_path: str) -> str:
+        p = Path(raw_path)
+        # Reject symlinks anywhere along the path (fail-closed)
+        if os.path.islink(raw_path) or p.is_symlink():
+            raise MediaPolicyError("SYMLINK_NOT_ALLOWED", "No se permiten enlaces simbólicos en adjuntos de imagen.")
+
+        real_path = os.path.realpath(raw_path)
+        allowed = self._roots()
+        inside = False
+        for root in allowed:
+            try:
+                if os.path.commonpath([root, real_path]) == root and real_path != root:
+                    inside = True
+                    break
+            except ValueError:
+                continue
+        if not inside:
+            raise MediaPolicyError(
+                "PATH_OUTSIDE_ALLOWED_CACHE",
+                "La ruta de imagen está fuera del directorio de caché permitido de Hermes.",
+            )
+
+        if not os.path.isfile(real_path):
+            raise MediaPolicyError("FILE_NOT_FOUND", "El archivo de imagen en caché no existe o no es un archivo regular.")
+
+        # Re-check symlink after resolution
+        if os.path.islink(real_path):
+            raise MediaPolicyError("SYMLINK_NOT_ALLOWED", "No se permiten enlaces simbólicos en adjuntos de imagen.")
+        return real_path
+
+    def stage_from_gateway_path(
+        self,
+        *,
+        raw_path: str,
+        telegram_user_id: int,
+        dm_session_id: str,
+        ttl_seconds: int | None = None,
+        now: float | None = None,
+    ) -> StagedPhoto:
+        """Validate a Hermes-cached image path and register an opaque attachment_id."""
+        real_path = self._validate_path(raw_path)
+        size = os.path.getsize(real_path)
+        if size <= 0:
+            raise MediaPolicyError("EMPTY_IMAGE", "El archivo de imagen en caché está vacío.")
+        if size > self._max_bytes:
+            raise MediaPolicyError("IMAGE_TOO_LARGE", f"La imagen excede el límite permitido ({self._max_bytes} bytes).")
+
+        with open(real_path, "rb") as fh:
+            raw_bytes = fh.read()
+        img = _open_and_validate_image(raw_bytes)
+        fmt = (img.format or "").upper()
+        ctype = _PILLOW_FORMAT_TO_CTYPE.get(fmt)
+        if not ctype:
+            raise MediaPolicyError("UNSUPPORTED_IMAGE_FORMAT", f"Formato de imagen no soportado: {fmt!r}")
+
+        created = time.time() if now is None else now
+        ttl = self._default_ttl_seconds if ttl_seconds is None else ttl_seconds
+        att_id = f"att_{uuid.uuid4().hex[:10]}"
+        record = StagedPhoto(
+            attachment_id=att_id,
+            telegram_user_id=telegram_user_id,
+            dm_session_id=dm_session_id,
+            real_path=real_path,
+            filename=os.path.basename(real_path),
+            content_type=ctype,
+            size_bytes=size,
+            created_at=created,
+            expires_at=created + ttl,
+        )
+        with self._lock:
+            self._staged[att_id] = record
+        return record
+
+    def resolve_staged_bytes(
+        self,
+        *,
+        attachment_id: str,
+        telegram_user_id: int,
+        dm_session_id: str,
+        now: float | None = None,
+    ) -> tuple[bytes, str, str]:
+        """Resolve an opaque attachment_id (or 'latest') to verified bytes for the owning operator."""
+        current = time.time() if now is None else now
+        with self._lock:
+            if attachment_id == "latest":
+                candidates = [
+                    r
+                    for r in self._staged.values()
+                    if r.telegram_user_id == telegram_user_id
+                    and r.dm_session_id == dm_session_id
+                    and current < r.expires_at
+                ]
+                if not candidates:
+                    raise MediaPolicyError(
+                        "ATTACHMENT_NOT_FOUND",
+                        "No hay ninguna foto vigente adjunta en esta conversación.",
+                    )
+                rec = max(candidates, key=lambda r: r.created_at)
+            else:
+                rec = self._staged.get(attachment_id)
+                if rec is None:
+                    raise MediaPolicyError("ATTACHMENT_NOT_FOUND", f"Adjunto '{attachment_id}' no encontrado.")
+
+        if rec.telegram_user_id != telegram_user_id:
+            raise MediaPolicyError("UNAUTHORIZED_ATTACHMENT", "No puedes usar una foto adjunta por otro operador.")
+        if rec.dm_session_id != dm_session_id:
+            raise MediaPolicyError("ATTACHMENT_SESSION_MISMATCH", "La foto pertenece a otra conversación.")
+        if current >= rec.expires_at:
+            raise MediaPolicyError("ATTACHMENT_EXPIRED", "La foto adjunta expiró; vuelve a enviarla por Telegram.")
+
+        real_path = self._validate_path(rec.real_path)
+        with open(real_path, "rb") as fh:
+            raw_bytes = fh.read()
+        return raw_bytes, rec.filename, rec.content_type
+
+    def clear(self) -> None:
+        with self._lock:
+            self._staged.clear()

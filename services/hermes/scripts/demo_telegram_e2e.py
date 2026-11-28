@@ -15,6 +15,7 @@ import base64
 import io
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from services.hermes.plugins.lacasadeljean_mcp_bridge.bridge import (
     SessionActorRegistry,
     TrustedApprovalStore,
 )
+from services.hermes.plugins.lacasadeljean_mcp_bridge.media import StagedPhotoRegistry
 
 SHARED_SECRET = "demo-shared-mcp-secret-0123456789abcdef"
 ACTOR_SECRET = "demo-actor-assertion-secret-0123456789ab"
@@ -167,11 +169,17 @@ def main() -> None:
         allowed_telegram_users=frozenset({ADMIN_TG_ID, OPERATOR_TG_ID}),
     )
 
-    with TestClient(mcp_app) as tc:
+    with tempfile.TemporaryDirectory() as tmpdir, TestClient(mcp_app) as tc:
+        cache_dir = Path(tmpdir) / "cache" / "images"
+        cache_dir.mkdir(parents=True)
+        staged_photo_path = cache_dir / "jean_azul.jpg"
+        staged_photo_path.write_bytes(base64.b64decode(_sample_jpeg_b64()))
+
         post_adm, pre_llm, pre_tool, _, handlers = build_hooks_and_handlers(
             config=cfg,
             session_registry=SessionActorRegistry(),
             approval_store=TrustedApprovalStore(),
+            staged_photos=StagedPhotoRegistry(allowed_roots=(cache_dir,)),
             transport=SyncASGITransport(tc),
         )
 
@@ -206,22 +214,25 @@ def main() -> None:
         )
         print(f"    -> post_gateway_admission: {confirm_reply['reply']} (stock restante={backend.stock['var-32']})\n")
 
-        # 3. Admin photo choice (pillow_optimize) via propose_inventory_write -> post_gateway_admission CONFIRMAR
-        print(f"[3] Admin ({ADMIN_TG_ID}, rol=admin) envía foto -> photo_choice=pillow_optimize:")
-        assert pre_llm(session_id=admin_uuid, platform="telegram", sender_id=ADMIN_TG_ID) is None
+        # 3. Admin photo choice (pillow_optimize) from Hermes-cached [Image attached at: <path>]
+        print(f"[3] Admin ({ADMIN_TG_ID}, rol=admin) envía foto -> pre_llm_call staging + photo_choice=pillow_optimize:")
+        assert (
+            pre_llm(
+                session_id=admin_uuid,
+                platform="telegram",
+                sender_id=ADMIN_TG_ID,
+                user_message=f"Sube esta foto optimizada\n[Image attached at: {staged_photo_path}]",
+            )
+            is None
+        )
         prop_photo = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
                     "action": "attach_product_photo",
-                    "arguments": {
-                        "product_id": "prod-1",
-                        "image_base64": _sample_jpeg_b64(),
-                        "filename": "jean_azul.jpg",
-                        "content_type": "image/jpeg",
-                        "is_primary": True,
-                    },
+                    "arguments": {"product_id": "prod-1", "is_primary": True},
                     "source_modality": "photo",
                     "photo_choice": "pillow_optimize",
+                    "staged_attachment_id": "latest",
                 },
                 task_id=admin_uuid,
             )
