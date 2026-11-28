@@ -262,6 +262,7 @@ def verify_and_prepare_external_product_image(
 # ---------------------------------------------------------------------------
 
 _IMAGE_ATTACHED_RE = re.compile(r"\[Image attached at:\s*([^\]]+)\]")
+_DATA_URL_IMAGE_RE = re.compile(r"^data:image/(?:jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)$", re.IGNORECASE)
 _PILLOW_FORMAT_TO_CTYPE = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
 
 
@@ -279,24 +280,46 @@ def default_allowed_image_cache_dirs(env: dict[str, str] | None = None) -> tuple
     )
 
 
-def extract_attached_image_paths(user_message: Any) -> list[str]:
-    """Extract `[Image attached at: <path>]` markers from Hermes pre_llm_call user_message."""
+def extract_verified_multimodal_images(user_message: Any) -> tuple[list[str], frozenset[str]]:
+    """Extract `[Image attached at: <path>]` ONLY when accompanied by real `image_url` data URLs.
+
+    Plain text strings or text-only lists (e.g. a forged `[Image attached at: ...]` typed by a user)
+    return `([], frozenset())` so forged markers can NEVER stage another session's cached file.
+    """
+    if not isinstance(user_message, list):
+        return [], frozenset()
+
     texts: list[str] = []
-    if isinstance(user_message, str):
-        texts.append(user_message)
-    elif isinstance(user_message, list):
-        for part in user_message:
-            if isinstance(part, str):
-                texts.append(part)
-            elif isinstance(part, dict) and isinstance(part.get("text"), str):
-                texts.append(part["text"])
+    image_hashes: set[str] = set()
+    for part in user_message:
+        if not isinstance(part, dict):
+            continue
+        ptype = str(part.get("type") or "").strip().lower()
+        if ptype == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+        elif ptype == "image_url":
+            img_obj = part.get("image_url")
+            url = img_obj.get("url") if isinstance(img_obj, dict) else img_obj
+            if isinstance(url, str):
+                m = _DATA_URL_IMAGE_RE.match(url.strip())
+                if m:
+                    try:
+                        raw = base64.b64decode(m.group(1), validate=True)
+                    except ValueError:
+                        continue
+                    if raw:
+                        image_hashes.add(hashlib.sha256(raw).hexdigest())
+
+    if not image_hashes:
+        return [], frozenset()
+
     paths: list[str] = []
     for txt in texts:
         for match in _IMAGE_ATTACHED_RE.finditer(txt):
             candidate = match.group(1).strip()
             if candidate:
                 paths.append(candidate)
-    return paths
+    return paths, frozenset(image_hashes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,10 +393,16 @@ class StagedPhotoRegistry:
         raw_path: str,
         telegram_user_id: int,
         dm_session_id: str,
+        expected_sha256_set: frozenset[str],
         ttl_seconds: int | None = None,
         now: float | None = None,
     ) -> StagedPhoto:
-        """Validate a Hermes-cached image path and register an opaque attachment_id."""
+        """Validate a Hermes-cached image path AND verify its SHA-256 matches the multimodal payload."""
+        if not expected_sha256_set:
+            raise MediaPolicyError(
+                "IMAGE_PROOF_REQUIRED",
+                "Se requiere prueba multimodal (image_url) para registrar un adjunto de imagen.",
+            )
         real_path = self._validate_path(raw_path)
         size = os.path.getsize(real_path)
         if size <= 0:
@@ -383,6 +412,12 @@ class StagedPhotoRegistry:
 
         with open(real_path, "rb") as fh:
             raw_bytes = fh.read()
+        file_hash = hashlib.sha256(raw_bytes).hexdigest()
+        if file_hash not in expected_sha256_set:
+            raise MediaPolicyError(
+                "IMAGE_PROOF_MISMATCH",
+                "El archivo en caché no coincide con los bytes de la imagen adjunta en este mensaje.",
+            )
         img = _open_and_validate_image(raw_bytes)
         fmt = (img.format or "").upper()
         ctype = _PILLOW_FORMAT_TO_CTYPE.get(fmt)

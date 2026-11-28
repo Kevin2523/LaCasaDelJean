@@ -36,13 +36,11 @@ from .bridge import (
     parse_verified_telegram_sender,
 )
 from .media import (
-    ExternalImageCandidate,
     MediaPolicyError,
     StagedPhotoRegistry,
-    extract_attached_image_paths,
+    extract_verified_multimodal_images,
     optimize_photo_with_pillow,
     prepare_original_photo,
-    verify_and_prepare_external_product_image,
 )
 from .security import READ_ONLY_TOOLS, WRITE_TOOLS, BridgeSecurityError
 from .workflows import ProposalWorkflowManager, WorkflowError
@@ -120,7 +118,6 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "ID opaco (att_...) o 'latest' del adjunto staged por el gateway (nunca pasar rutas ni image_base64).",
                 },
-                "external_image_candidate": {"type": "object"},
                 "expected_brand": {"type": "string"},
                 "expected_model": {"type": "string"},
                 "expected_model_code": {"type": "string"},
@@ -156,30 +153,13 @@ def _apply_photo_choice(
     updated = dict(proposal_args)
 
     if choice == "exact_model_web_search":
-        cand_raw = args.get("external_image_candidate")
-        if not isinstance(cand_raw, dict):
-            raise MediaPolicyError(
-                "EXTERNAL_SEARCH_PROVIDER_REQUIRED",
-                "No hay proveedor autorizado de búsqueda de imágenes configurado; proporciona un candidato "
-                "verificado con licencia permitida o elige 'original' / 'pillow_optimize'.",
-            )
-        img_bytes = base64.b64decode(str(cand_raw.get("image_base64") or ""), validate=True)
-        candidate = ExternalImageCandidate(
-            brand=str(cand_raw.get("brand") or ""),
-            model_name=str(cand_raw.get("model_name") or ""),
-            model_code=cand_raw.get("model_code"),
-            source_url=str(cand_raw.get("source_url") or ""),
-            license_type=str(cand_raw.get("license_type") or ""),
-            attribution=str(cand_raw.get("attribution") or ""),
-            filename=str(cand_raw.get("filename") or "external.jpg"),
-            content_type=str(cand_raw.get("content_type") or "image/jpeg"),
-            image_bytes=img_bytes,
-        )
-        prepared = verify_and_prepare_external_product_image(
-            candidate=candidate,
-            expected_brand=str(args.get("expected_brand") or ""),
-            expected_model=str(args.get("expected_model") or ""),
-            expected_model_code=args.get("expected_model_code"),
+        # Never trust LLM-supplied external_image_candidate/license_type/image_base64.
+        # Fail closed until a trusted server-side licensed image search provider is configured.
+        raise MediaPolicyError(
+            "EXTERNAL_SEARCH_PROVIDER_REQUIRED",
+            "No hay proveedor autorizado de búsqueda de imágenes configurado en el servidor; "
+            "el modelo no puede suministrar candidatos externos auto-declarados. "
+            "Usa 'original' o 'pillow_optimize' con una foto adjunta en Telegram.",
         )
     elif choice in ("original", "pillow_optimize"):
         att_id = str(args.get("staged_attachment_id") or "").strip()
@@ -391,18 +371,20 @@ def build_hooks_and_handlers(
 
         registry.bind(session_id=session_id, conversation_id=conversation_id, telegram_user_id=uid)
 
-        # Stage any trusted Hermes-cached Telegram photo markers (`[Image attached at: <path>]`).
+        # Stage ONLY verified multimodal Telegram photos (requires matching image_url data URL hash).
         dm_session = _stable_dm_session(uid)
-        for raw_img_path in extract_attached_image_paths(user_message):
+        img_paths, img_hashes = extract_verified_multimodal_images(user_message)
+        for raw_img_path in img_paths:
             try:
                 staged_registry.stage_from_gateway_path(
                     raw_path=raw_img_path,
                     telegram_user_id=uid,
                     dm_session_id=dm_session,
+                    expected_sha256_set=img_hashes,
                     now=_now(),
                 )
             except MediaPolicyError:
-                # Invalid, symlink, or out-of-cache paths are never staged (fail-closed).
+                # Forged markers, hash mismatches, symlinks, or out-of-cache paths are never staged.
                 continue
         return None
 

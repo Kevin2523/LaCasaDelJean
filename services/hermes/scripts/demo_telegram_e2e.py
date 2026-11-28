@@ -214,14 +214,19 @@ def main() -> None:
         )
         print(f"    -> post_gateway_admission: {confirm_reply['reply']} (stock restante={backend.stock['var-32']})\n")
 
-        # 3. Admin photo choice (pillow_optimize) from Hermes-cached [Image attached at: <path>]
-        print(f"[3] Admin ({ADMIN_TG_ID}, rol=admin) envía foto -> pre_llm_call staging + photo_choice=pillow_optimize:")
+        # 3. Admin photo choice (pillow_optimize) from verified multimodal Hermes payload
+        print(f"[3] Admin ({ADMIN_TG_ID}, rol=admin) envía foto -> pre_llm_call multimodal staging + photo_choice=pillow_optimize:")
+        sample_b64 = _sample_jpeg_b64()
+        staged_photo_path.write_bytes(base64.b64decode(sample_b64))
         assert (
             pre_llm(
                 session_id=admin_uuid,
                 platform="telegram",
                 sender_id=ADMIN_TG_ID,
-                user_message=f"Sube esta foto optimizada\n[Image attached at: {staged_photo_path}]",
+                user_message=[
+                    {"type": "text", "text": f"Sube esta foto optimizada\n[Image attached at: {staged_photo_path}]"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{sample_b64}"}},
+                ],
             )
             is None
         )
