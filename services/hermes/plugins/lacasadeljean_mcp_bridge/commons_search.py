@@ -40,6 +40,15 @@ def _strip_html(raw: str) -> str:
     return _HTML_TAG_RE.sub("", raw or "").strip()
 
 
+def _has_exact_token_sequence(haystack: str, needle: str) -> bool:
+    """Match needle as an exact alphanumeric token sequence (rejects substrings like Niketown or CW2288-111X)."""
+    tokens = [t for t in re.split(r"[\s_]+", (needle or "").strip().lower()) if t]
+    if not tokens:
+        return False
+    pattern = r"(?<![a-z0-9])" + r"[\s_]+".join(re.escape(t) for t in tokens) + r"(?![a-z0-9])"
+    return re.search(pattern, (haystack or "").lower()) is not None
+
+
 def normalize_commons_license(raw_short_name: str) -> str | None:
     """Map Wikimedia Commons LicenseShortName to our commercial-safe allowlist, or None if disallowed."""
     norm = (raw_short_name or "").strip().lower()
@@ -198,8 +207,12 @@ class CommonsImageSearchProvider:
             img_desc = _strip_html(str((extmeta.get("ImageDescription") or {}).get("value") or ""))
             combined_meta = f"{title} {obj_name} {img_desc}".lower()
 
-            # Require exact brand + model_name + model_code in official metadata
-            if b.lower() not in combined_meta or m.lower() not in combined_meta or c.lower() not in combined_meta:
+            # Require exact token-boundary match for brand, model_name, and model_code
+            if (
+                not _has_exact_token_sequence(combined_meta, b)
+                or not _has_exact_token_sequence(combined_meta, m)
+                or not _has_exact_token_sequence(combined_meta, c)
+            ):
                 continue
 
             attribution = artist or credit or "Wikimedia Commons contributor"
@@ -262,24 +275,48 @@ class CommonsImageSearchProvider:
 
         safe_url = validate_allowed_download_url(rec.download_url)
         headers = {"User-Agent": "LaCasaDelJeanV2-InventoryBot/1.0 (https://commons.wikimedia.org)"}
+        buf = bytearray()
         try:
             with httpx.Client(
                 transport=self._transport,
                 timeout=self._timeout_seconds,
                 follow_redirects=False,
             ) as client:
-                resp = client.get(safe_url, headers=headers)
+                with client.stream("GET", safe_url, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        raise MediaPolicyError(
+                            "COMMONS_DOWNLOAD_ERROR",
+                            f"Descarga rechazada por Wikimedia Commons (HTTP {resp.status_code}).",
+                        )
+                    resp_mime = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+                    if resp_mime not in ALLOWED_CONTENT_TYPES:
+                        raise MediaPolicyError(
+                            "UNSUPPORTED_CONTENT_TYPE",
+                            f"Tipo MIME de descarga no permitido: {resp_mime!r}.",
+                        )
+                    raw_cl = resp.headers.get("content-length")
+                    if raw_cl is not None:
+                        try:
+                            if int(raw_cl) > self._max_bytes:
+                                raise MediaPolicyError(
+                                    "IMAGE_TOO_LARGE",
+                                    "La imagen excede el límite de tamaño permitido (Content-Length).",
+                                )
+                        except ValueError:
+                            pass
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        buf.extend(chunk)
+                        if len(buf) > self._max_bytes:
+                            raise MediaPolicyError(
+                                "IMAGE_TOO_LARGE",
+                                "La imagen descargada excede el límite de tamaño permitido.",
+                            )
+        except MediaPolicyError:
+            raise
         except httpx.HTTPError as exc:
             raise MediaPolicyError("COMMONS_DOWNLOAD_ERROR", f"Error al descargar imagen de Wikimedia Commons: {exc}") from exc
 
-        if resp.status_code != 200:
-            raise MediaPolicyError(
-                "COMMONS_DOWNLOAD_ERROR",
-                f"Descarga rechazada por Wikimedia Commons (HTTP {resp.status_code}).",
-            )
-        raw_bytes = resp.content
-        if len(raw_bytes) > self._max_bytes:
-            raise MediaPolicyError("IMAGE_TOO_LARGE", "La imagen descargada excede el límite de tamaño permitido.")
+        raw_bytes = bytes(buf)
 
         filename = rec.title.removeprefix("File:").strip().replace(" ", "_") or "commons_product.jpg"
         return verify_and_prepare_external_product_image(

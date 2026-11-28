@@ -684,6 +684,28 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
                                     }
                                 ],
                             },
+                            "4": {
+                                "title": "File:Niketown Air Force 1 CW2288-111.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/niketown.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": len(sample_bytes),
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            },
+                            "5": {
+                                "title": "File:Nike Air Force 1 CW2288-111X.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/code_suffix.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": len(sample_bytes),
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            },
                         }
                     }
                 },
@@ -784,6 +806,58 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
         )
         assert exp_cand["ok"] is False
         assert exp_cand["error"]["code"] == "CANDIDATE_EXPIRED"
+
+
+def test_commons_streaming_size_limit_and_mime_rejection() -> None:
+    def oversized_stream_mock(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "commons.wikimedia.org":
+            return httpx.Response(
+                200,
+                json={
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:Nike Air Force 1 CW2288-111 Big.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/big.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": 500,
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                },
+            )
+        # Stream chunks totaling > 1024 bytes without Content-Length
+        class ChunkedStream(httpx.SyncByteStream):
+            def __iter__(self):
+                for _ in range(5):
+                    yield b"A" * 300
+
+        return httpx.Response(200, stream=ChunkedStream(), headers={"content-type": "image/jpeg"})
+
+    provider = CommonsImageSearchProvider(
+        transport=httpx.MockTransport(oversized_stream_mock),
+        max_bytes=1024,
+    )
+    cands = provider.search_and_stage(
+        brand="Nike",
+        model_name="Air Force 1",
+        model_code="CW2288-111",
+        telegram_user_id=ADMIN_TG_ID,
+        dm_session_id=f"telegram:dm:{ADMIN_TG_ID}",
+    )
+    assert len(cands) == 1
+    with pytest.raises(MediaPolicyError) as exc_big:
+        provider.fetch_and_prepare_candidate(
+            candidate_id=cands[0]["candidate_id"],
+            telegram_user_id=ADMIN_TG_ID,
+            dm_session_id=f"telegram:dm:{ADMIN_TG_ID}",
+        )
+    assert exc_big.value.code == "IMAGE_TOO_LARGE"
 
 
 # ---------------------------------------------------------------------------
