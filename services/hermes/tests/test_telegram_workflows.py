@@ -652,7 +652,7 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
                                         "mime": "image/jpeg",
                                         "size": len(sample_bytes),
                                         "extmetadata": {
-                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                            "LicenseShortName": {"value": "CC0 1.0"},
                                             "Artist": {"value": "Wikimedia Photographer"},
                                             "ImageDescription": {"value": "Nike Air Force 1 CW2288-111 sneaker"},
                                         },
@@ -660,15 +660,15 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
                                 ],
                             },
                             "2": {
-                                "title": "File:Nike Air Force 1 CW2288-111 NC.jpg",
+                                "title": "File:Nike Air Force 1 CW2288-111 CCBY.jpg",
                                 "imageinfo": [
                                     {
-                                        "url": "https://upload.wikimedia.org/wikipedia/commons/af1_nc.jpg",
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/af1_ccby.jpg",
                                         "mime": "image/jpeg",
                                         "size": len(sample_bytes),
                                         "extmetadata": {
-                                            "LicenseShortName": {"value": "CC BY-NC 4.0"},
-                                            "Artist": {"value": "NC Author"},
+                                            "LicenseShortName": {"value": "CC BY 4.0"},
+                                            "Artist": {"value": "Attribution Required Author"},
                                         },
                                     }
                                 ],
@@ -738,7 +738,7 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
         assert pre_llm(session_id=admin_uuid, platform="telegram", sender_id=ADMIN_TG_ID) is None
         assert pre_llm(session_id=op_uuid, platform="telegram", sender_id=OPERATOR_TG_ID) is None
 
-        # Search returns ONLY the 1 verified CC BY-SA candidate (NC & evil host filtered out)
+        # Search returns ONLY the 1 verified CC0 candidate (CC BY, evil host, Niketown, CW2288-111X filtered out)
         search_res = json.loads(
             handlers[IMAGE_SEARCH_TOOL_NAME](
                 {"brand": "Nike", "model_name": "Air Force 1", "model_code": "CW2288-111"},
@@ -749,7 +749,7 @@ def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> Non
         assert len(search_res["candidates"]) == 1
         cand_id = search_res["candidates"][0]["candidate_id"]
         assert cand_id.startswith("ext_")
-        assert search_res["candidates"][0]["license_type"] == "cc_by_sa"
+        assert search_res["candidates"][0]["license_type"] == "cc0"
 
         # Cross-user attempt to use Admin's candidate_id fails closed
         cross_cand = json.loads(

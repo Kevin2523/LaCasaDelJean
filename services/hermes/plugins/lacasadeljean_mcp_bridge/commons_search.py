@@ -50,21 +50,19 @@ def _has_exact_token_sequence(haystack: str, needle: str) -> bool:
 
 
 def normalize_commons_license(raw_short_name: str) -> str | None:
-    """Map Wikimedia Commons LicenseShortName to our commercial-safe allowlist, or None if disallowed."""
+    """Map Wikimedia Commons LicenseShortName to attribution-free commercial-safe allowlist (CC0 / Public Domain).
+
+    CC BY / CC BY-SA are intentionally rejected until FastAPI/Angular persist and render attribution.
+    """
     norm = (raw_short_name or "").strip().lower()
     if not norm:
         return None
-    # Reject Non-Commercial (NC), No-Derivatives (ND), Fair use, Copyrighted
-    if any(bad in norm for bad in ("nc", "nd", "fair use", "copyright", "all rights", "gpl")):
+    if any(bad in norm for bad in ("nc", "nd", "fair use", "copyright", "all rights", "gpl", "cc by", "cc-by")):
         return None
     if norm.startswith("cc0") or "cc-zero" in norm:
         return "cc0"
     if "public domain" in norm or norm == "pd":
         return "public_domain"
-    if norm.startswith("cc by-sa") or norm.startswith("cc-by-sa"):
-        return "cc_by_sa"
-    if norm.startswith("cc by") or norm.startswith("cc-by"):
-        return "cc_by"
     return None
 
 
