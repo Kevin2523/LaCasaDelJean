@@ -2,20 +2,28 @@
 
 Conforms to https://hermes-agent.nousresearch.com/docs/user-guide/features/hooks
 and https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins:
+- `post_gateway_admission(session_key, platform, source, message_id, text, **kwargs)`
+  intercepts explicit `CONFIRMAR <proposal_id>` / `CANCELAR <proposal_id>` messages
+  after gateway auth, validates Telegram operator & session ownership, executes
+  writes OUTSIDE the LLM via `TrustedMCPBridgeClient`, and returns
+  `{"action": "handled", "reply": "..."}`.
 - `pre_llm_call(session_id, user_message, is_first_turn, model, platform, **kwargs)`
   binds verified Telegram `sender_id` to `session_id` / `conversation_id` (fail-closed).
 - `pre_tool_call(tool_name, args, task_id, **kwargs)`
-  returns `{"action": "block", "message": "..."}` for disallowed tools, spoofed args,
+  blocks disallowed tools (including direct calls to the 6 write tools), spoofed args,
   or unverified sessions.
-- `ctx.register_tool(name, schema, handler, toolset=...)`
-  registers the 9 inventory tools so every MCP call goes through `TrustedMCPBridgeClient`
-  with a fresh per-call signed `X-Actor-Assertion` header.
+- `ctx.register_tool(...)` exposes ONLY the 3 read-only inventory tools and the
+  non-mutating `propose_inventory_write` tool to the model. The 6 write tools are
+  never exposed to the LLM and execute solely through the trusted internal bridge
+  after explicit human confirmation.
 """
 
 from __future__ import annotations
 
-import asyncio
+import base64
 import json
+import os
+import re
 from typing import Any
 
 from .bridge import (
@@ -27,11 +35,31 @@ from .bridge import (
     normalize_tool_name,
     parse_verified_telegram_sender,
 )
-from .security import ALLOWED_MCP_TOOLS, BridgeSecurityError
+from .commons_search import CommonsImageSearchProvider
+from .media import (
+    MediaPolicyError,
+    StagedPhotoRegistry,
+    extract_verified_multimodal_images,
+    optimize_photo_with_pillow,
+    prepare_original_photo,
+)
+from .security import READ_ONLY_TOOLS, WRITE_TOOLS, BridgeSecurityError
+from .workflows import ProposalWorkflowManager, WorkflowError
 
-# Module-level registries (reset on restart -> fail-closed until fresh pre_llm_call).
+# Module-level registries (reset on restart -> fail-closed until fresh gateway/pre_llm_call).
 SESSION_ACTORS = SessionActorRegistry()
 APPROVAL_STORE = TrustedApprovalStore()
+STAGED_PHOTOS = StagedPhotoRegistry()
+COMMONS_SEARCH = CommonsImageSearchProvider()
+
+PROPOSAL_TOOL_NAME = "propose_inventory_write"
+IMAGE_SEARCH_TOOL_NAME = "search_licensed_product_images"
+MODEL_EXPOSED_TOOLS: frozenset[str] = READ_ONLY_TOOLS | frozenset({PROPOSAL_TOOL_NAME, IMAGE_SEARCH_TOOL_NAME})
+
+_CONFIRM_CANCEL_RE = re.compile(
+    r"^\s*(CONFIRMAR|CONFIRM|CANCELAR|CANCEL)\s+(prop_[a-fA-F0-9]+)\s*$",
+    re.IGNORECASE,
+)
 
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "search_products": {
@@ -66,108 +94,157 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["variant_id"],
         },
     },
-    "create_product_draft": {
-        "name": "create_product_draft",
-        "description": "Crear producto en borrador (requiere confirmación explícita previa del operador).",
+    IMAGE_SEARCH_TOOL_NAME: {
+        "name": IMAGE_SEARCH_TOOL_NAME,
+        "description": (
+            "Buscar imágenes con licencia comercial verificada en Wikimedia Commons para un "
+            "modelo exacto (marca + modelo + código). Solo lectura; devuelve candidate_id opacos."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "category_id": {"type": "string"},
-                "sku": {"type": "string"},
-                "name": {"type": "string"},
-                "slug": {"type": "string"},
-                "description": {"type": "string"},
-                "idempotency_key": {"type": "string"},
+                "brand": {"type": "string"},
+                "model_name": {"type": "string"},
+                "model_code": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
             },
-            "required": ["category_id", "sku", "name", "slug", "idempotency_key"],
+            "required": ["brand", "model_name", "model_code"],
         },
     },
-    "create_variant": {
-        "name": "create_variant",
-        "description": "Crear variante/talla en borrador (requiere confirmación explícita previa).",
+    PROPOSAL_TOOL_NAME: {
+        "name": PROPOSAL_TOOL_NAME,
+        "description": (
+            "Crear una propuesta de escritura en borrador y devolver la vista previa estructurada "
+            "para confirmación explícita del operador (NO ejecuta cambios en inventario)."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "product_id": {"type": "string"},
-                "sku": {"type": "string"},
-                "size": {"type": "string"},
-                "color": {"type": "string"},
-                "color_hex": {"type": "string"},
-                "barcode": {"type": "string"},
-                "idempotency_key": {"type": "string"},
-            },
-            "required": ["product_id", "sku", "size", "color", "idempotency_key"],
-        },
-    },
-    "attach_product_photo": {
-        "name": "attach_product_photo",
-        "description": "Adjuntar foto de producto vía pipeline seguro (requiere confirmación explícita previa).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "product_id": {"type": "string"},
-                "image_base64": {"type": "string"},
-                "filename": {"type": "string"},
-                "content_type": {"type": "string"},
-                "variant_id": {"type": "string"},
-                "alt_text": {"type": "string"},
-                "display_order": {"type": "integer", "default": 0},
-                "is_primary": {"type": "boolean", "default": False},
-                "idempotency_key": {"type": "string"},
-            },
-            "required": ["product_id", "image_base64", "filename", "content_type", "idempotency_key"],
-        },
-    },
-    "set_product_price": {
-        "name": "set_product_price",
-        "description": "Actualizar precio en PAB (Balboa) (requiere confirmación explícita previa).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "product_id": {"type": "string"},
-                "amount_pab": {"type": "string"},
-                "compare_at_pab": {"type": "string"},
-                "variant_id": {"type": "string"},
-                "idempotency_key": {"type": "string"},
-            },
-            "required": ["product_id", "amount_pab", "idempotency_key"],
-        },
-    },
-    "record_stock_movement": {
-        "name": "record_stock_movement",
-        "description": "Registrar movimiento de stock o venta física (requiere confirmación explícita previa).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "variant_id": {"type": "string"},
-                "direction": {"type": "string", "enum": ["in", "out"]},
-                "movement_type": {
+                "action": {
                     "type": "string",
-                    "enum": ["initial_load", "restock", "sale", "return", "adjustment", "damage"],
+                    "enum": sorted(WRITE_TOOLS),
                 },
-                "quantity": {"type": "integer"},
-                "idempotency_key": {"type": "string"},
-                "reference_type": {"type": "string"},
-                "reference_id": {"type": "string"},
-                "note": {"type": "string"},
+                "arguments": {"type": "object"},
+                "source_modality": {
+                    "type": "string",
+                    "enum": ["text", "photo", "voice"],
+                    "default": "text",
+                },
+                "photo_choice": {
+                    "type": "string",
+                    "enum": ["original", "pillow_optimize", "exact_model_web_search"],
+                },
+                "staged_attachment_id": {
+                    "type": "string",
+                    "description": "ID opaco (att_...) o 'latest' del adjunto staged por el gateway (nunca pasar rutas ni image_base64).",
+                },
+                "external_candidate_id": {
+                    "type": "string",
+                    "description": "ID opaco (ext_...) devuelto por search_licensed_product_images para exact_model_web_search.",
+                },
+                "expected_brand": {"type": "string"},
+                "expected_model": {"type": "string"},
+                "expected_model_code": {"type": "string"},
             },
-            "required": ["variant_id", "direction", "movement_type", "quantity", "idempotency_key"],
-        },
-    },
-    "set_product_publication_status": {
-        "name": "set_product_publication_status",
-        "description": "Publicar, archivar o volver a borrador un producto (requiere confirmación explícita previa).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "product_id": {"type": "string"},
-                "publication_status": {"type": "string", "enum": ["draft", "published", "archived"]},
-                "idempotency_key": {"type": "string"},
-            },
-            "required": ["product_id", "publication_status", "idempotency_key"],
+            "required": ["action", "arguments"],
         },
     },
 }
+
+
+_UNTRUSTED_IMAGE_KEYS = frozenset({"image_base64", "file_path", "image_path", "path"})
+
+
+def _apply_photo_choice(
+    args: dict[str, Any],
+    proposal_args: dict[str, Any],
+    *,
+    staged_registry: StagedPhotoRegistry,
+    commons_provider: CommonsImageSearchProvider,
+    telegram_user_id: int,
+    dm_session_id: str,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Process operator photo choice via media.py using ONLY trusted staged attachments or server-side Commons IDs."""
+    untrusted = [k for k in proposal_args if k in _UNTRUSTED_IMAGE_KEYS]
+    if untrusted:
+        raise MediaPolicyError(
+            "UNTRUSTED_IMAGE_INPUT",
+            f"El modelo no puede suministrar {', '.join(sorted(untrusted))}. "
+            "Usa staged_attachment_id o external_candidate_id.",
+        )
+
+    choice = args.get("photo_choice") or "original"
+    updated = dict(proposal_args)
+
+    if choice == "exact_model_web_search":
+        cand_id = str(args.get("external_candidate_id") or "").strip()
+        if not cand_id:
+            raise MediaPolicyError(
+                "EXTERNAL_CANDIDATE_ID_REQUIRED",
+                "Se requiere external_candidate_id devuelto por search_licensed_product_images "
+                "(nunca candidatos auto-declarados por el modelo).",
+            )
+        prepared = commons_provider.fetch_and_prepare_candidate(
+            candidate_id=cand_id,
+            telegram_user_id=telegram_user_id,
+            dm_session_id=dm_session_id,
+            now=now,
+        )
+    elif choice in ("original", "pillow_optimize"):
+        att_id = str(args.get("staged_attachment_id") or "").strip()
+        if not att_id:
+            raise MediaPolicyError(
+                "STAGED_ATTACHMENT_REQUIRED",
+                "Se requiere staged_attachment_id (ID opaco de foto adjunta en Telegram o 'latest').",
+            )
+        img_bytes, filename, content_type = staged_registry.resolve_staged_bytes(
+            attachment_id=att_id,
+            telegram_user_id=telegram_user_id,
+            dm_session_id=dm_session_id,
+            now=now,
+        )
+        if choice == "original":
+            prepared = prepare_original_photo(
+                image_bytes=img_bytes,
+                filename=filename,
+                content_type=content_type,
+            )
+        else:
+            prepared = optimize_photo_with_pillow(
+                image_bytes=img_bytes,
+                filename=filename,
+            )
+    else:
+        raise MediaPolicyError("INVALID_PHOTO_CHOICE", f"Opción de foto no soportada: {choice!r}")
+
+    updated["image_base64"] = prepared.image_base64
+    updated["filename"] = prepared.filename
+    updated["content_type"] = prepared.content_type
+    return updated
+
+
+def _stable_dm_session(telegram_user_id: int) -> str:
+    """Stable per-user DM identity shared between Hermes UUID sessions and gateway session_key."""
+    return f"telegram:dm:{telegram_user_id}"
+
+
+def _validate_dm_source(source: dict[str, Any], verified_uid: int) -> None:
+    """Enforce private DM coherence when gateway source metadata includes chat_type / chat_id."""
+    chat_type = source.get("chat_type")
+    if chat_type is not None:
+        norm_type = str(chat_type).strip().lower()
+        if norm_type not in ("dm", "private"):
+            raise BridgeSecurityError(
+                "GROUP_CHAT_NOT_ALLOWED",
+                f"Las confirmaciones de inventario solo se permiten en chat privado (DM), no en '{norm_type}'.",
+            )
+    chat_id = source.get("chat_id")
+    if chat_id is not None and str(chat_id).strip() != str(verified_uid):
+        raise BridgeSecurityError(
+            "CHAT_ACTOR_MISMATCH",
+            "El chat_id de Telegram no coincide con el operador autenticado.",
+        )
 
 
 def build_hooks_and_handlers(
@@ -175,14 +252,127 @@ def build_hooks_and_handlers(
     config: BridgeConfig | None = None,
     session_registry: SessionActorRegistry | None = None,
     approval_store: TrustedApprovalStore | None = None,
+    workflow_manager: ProposalWorkflowManager | None = None,
+    staged_photos: StagedPhotoRegistry | None = None,
+    commons_provider: CommonsImageSearchProvider | None = None,
     transport: Any = None,
-) -> tuple[Any, Any, Any, dict[str, Any]]:
-    """Construct official v0.23.4 hook callbacks and tool handlers."""
+    clock: Any = None,
+) -> tuple[Any, Any, Any, Any, dict[str, Any]]:
+    """Construct official v0.23.4 hook callbacks and model-exposed tool handlers."""
     registry = session_registry if session_registry is not None else SESSION_ACTORS
     approvals = approval_store if approval_store is not None else APPROVAL_STORE
+    staged_registry = staged_photos if staged_photos is not None else STAGED_PHOTOS
+    commons = commons_provider if commons_provider is not None else COMMONS_SEARCH
 
     def _cfg() -> BridgeConfig:
         return config if config is not None else BridgeConfig.from_env()
+
+    def _now() -> float | None:
+        return clock() if clock is not None else None
+
+    ttl_default = int(os.environ.get("HERMES_PROPOSAL_TTL_SECONDS") or "120")
+    wf = (
+        workflow_manager
+        if workflow_manager is not None
+        else ProposalWorkflowManager(
+            config=_cfg(),
+            approval_store=approvals,
+            default_ttl_seconds=ttl_default,
+        )
+    )
+
+    def on_post_gateway_admission(
+        session_key: str = "",
+        platform: str = "",
+        source: dict[str, Any] | None = None,
+        message_id: str = "",
+        text: str = "",
+        **kwargs: Any,
+    ) -> dict[str, Any] | None:
+        """Official v0.23.4 post_gateway_admission hook: intercept CONFIRMAR/CANCELAR outside LLM.
+
+        Because Hermes treats an uncaught exception in post_gateway_admission as fail-open,
+        the entire CONFIRMAR/CANCELAR path is wrapped so it ALWAYS returns `{"action": "handled", ...}`
+        and never leaks a confirmation command to the LLM.
+        """
+        del session_key, message_id, kwargs
+        match = _CONFIRM_CANCEL_RE.match(text or "")
+        if not match:
+            return None
+
+        try:
+            verb = match.group(1).upper()
+            proposal_id = match.group(2)
+            src = source if isinstance(source, dict) else {}
+            raw_user_id = src.get("user_id") if src.get("user_id") is not None else src.get("sender_id")
+
+            cfg = _cfg()
+            try:
+                uid = parse_verified_telegram_sender(platform=platform, sender_id=raw_user_id)
+                if not cfg.allowed_telegram_users or uid not in cfg.allowed_telegram_users:
+                    raise BridgeSecurityError(
+                        "USER_NOT_ALLOWED",
+                        f"El usuario de Telegram {uid} no está autorizado en TELEGRAM_ALLOWED_USERS.",
+                    )
+                _validate_dm_source(src, uid)
+            except BridgeSecurityError as exc:
+                return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+
+            dm_session = _stable_dm_session(uid)
+
+            if verb in ("CANCELAR", "CANCEL"):
+                try:
+                    wf.cancel_proposal(
+                        proposal_id=proposal_id,
+                        telegram_user_id=uid,
+                        session_id=dm_session,
+                        now=_now(),
+                    )
+                except WorkflowError as exc:
+                    return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+                return {
+                    "action": "handled",
+                    "reply": f"❌ Propuesta {proposal_id} cancelada. No se realizó ningún cambio en el inventario.",
+                }
+
+            # Explicit CONFIRMAR -> execute via trusted internal MCP bridge outside the LLM
+            client = TrustedMCPBridgeClient(
+                cfg,
+                sync_transport=transport,
+                approval_store=approvals,
+            )
+            try:
+                result = wf.confirm_proposal_sync(
+                    proposal_id=proposal_id,
+                    telegram_user_id=uid,
+                    session_id=dm_session,
+                    bridge_client=client,
+                    now=_now(),
+                )
+            except WorkflowError as exc:
+                return {"action": "handled", "reply": f"⛔ [{exc.code}] {exc.message}"}
+
+            if not result.get("ok"):
+                err = result.get("error") or {}
+                return {
+                    "action": "handled",
+                    "reply": f"⛔ Error al ejecutar {proposal_id}: [{err.get('code', 'MCP_ERROR')}] {err.get('message', '')}",
+                }
+
+            return {
+                "action": "handled",
+                "reply": f"✅ Propuesta {proposal_id} confirmada y ejecutada vía MCP.",
+                "result": result,
+            }
+        except Exception:
+            return {
+                "action": "handled",
+                "reply": (
+                    "⛔ [INTERNAL_CONFIRMATION_ERROR] Error interno con resultado incierto al procesar "
+                    "la confirmación/cancelación. Verifica y concilia el estado del inventario antes de "
+                    "reintentar para evitar duplicados."
+                ),
+            }
 
     def on_pre_llm_call(
         session_id: str = "",
@@ -193,8 +383,8 @@ def build_hooks_and_handlers(
         **kwargs: Any,
     ) -> dict[str, Any] | None:
         """Bind verified Telegram sender_id to session_id/conversation_id; fail closed."""
-        del user_message, is_first_turn, model
-        conversation_id = str(kwargs.get("conversation_id") or "")
+        del is_first_turn, model
+        conversation_id = str(kwargs.get("conversation_id") or kwargs.get("session_key") or "")
         sender_id = kwargs.get("sender_id")
         if sender_id is None:
             sender_id = kwargs.get("user_id")
@@ -212,6 +402,22 @@ def build_hooks_and_handlers(
             return {"action": "block", "message": f"[{exc.code}] {exc.message}"}
 
         registry.bind(session_id=session_id, conversation_id=conversation_id, telegram_user_id=uid)
+
+        # Stage ONLY verified multimodal Telegram photos (requires matching image_url data URL hash).
+        dm_session = _stable_dm_session(uid)
+        img_paths, img_hashes = extract_verified_multimodal_images(user_message)
+        for raw_img_path in img_paths:
+            try:
+                staged_registry.stage_from_gateway_path(
+                    raw_path=raw_img_path,
+                    telegram_user_id=uid,
+                    dm_session_id=dm_session,
+                    expected_sha256_set=img_hashes,
+                    now=_now(),
+                )
+            except MediaPolicyError:
+                # Forged markers, hash mismatches, symlinks, or out-of-cache paths are never staged.
+                continue
         return None
 
     def on_pre_tool_call(
@@ -220,12 +426,15 @@ def build_hooks_and_handlers(
         task_id: str = "",
         **kwargs: Any,
     ) -> dict[str, Any] | None:
-        """Official v0.23.4 pre_tool_call policy hook: return {'action': 'block', 'message': ...}."""
+        """Official v0.23.4 pre_tool_call policy hook: block non-exposed tools, spoofing, unverified sessions."""
         canonical = normalize_tool_name(tool_name)
-        if canonical not in ALLOWED_MCP_TOOLS:
+        if canonical not in MODEL_EXPOSED_TOOLS:
             return {
                 "action": "block",
-                "message": f"[TOOL_NOT_ALLOWED] La herramienta '{tool_name}' no está autorizada.",
+                "message": (
+                    f"[TOOL_NOT_ALLOWED] La herramienta '{tool_name}' no está expuesta al modelo. "
+                    f"Usa '{PROPOSAL_TOOL_NAME}' para proponer escrituras y esperar confirmación humana."
+                ),
             }
 
         try:
@@ -244,10 +453,10 @@ def build_hooks_and_handlers(
         return None
 
     def on_session_end(session_id: str = "", **kwargs: Any) -> None:
-        conversation_id = str(kwargs.get("conversation_id") or "")
+        conversation_id = str(kwargs.get("conversation_id") or kwargs.get("session_key") or "")
         registry.unbind(session_id=session_id, conversation_id=conversation_id)
 
-    def _make_tool_handler(tool_name: str):
+    def _make_read_handler(tool_name: str):
         def handler(
             args: dict[str, Any],
             task_id: str = "",
@@ -271,14 +480,127 @@ def build_hooks_and_handlers(
 
         return handler
 
-    handlers = {name: _make_tool_handler(name) for name in TOOL_SCHEMAS}
-    return on_pre_llm_call, on_pre_tool_call, on_session_end, handlers
+    def _propose_handler(
+        args: dict[str, Any],
+        task_id: str = "",
+        session_id: str = "",
+        conversation_id: str = "",
+        **kwargs: Any,
+    ) -> str:
+        del kwargs
+        uid = registry.resolve(task_id, session_id, conversation_id)
+        if uid is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "SESSION_NOT_VERIFIED",
+                        "message": "No existe identidad Telegram verificada para esta sesión (fail-closed).",
+                    },
+                },
+                ensure_ascii=False,
+            )
+
+        effective_session = _stable_dm_session(uid)
+        action = str(args.get("action") or "")
+        proposal_args = dict(args.get("arguments") or {})
+        modality = args.get("source_modality") or "text"
+
+        try:
+            if normalize_tool_name(action) == "attach_product_photo":
+                proposal_args = _apply_photo_choice(
+                    args,
+                    proposal_args,
+                    staged_registry=staged_registry,
+                    commons_provider=commons,
+                    telegram_user_id=uid,
+                    dm_session_id=effective_session,
+                    now=_now(),
+                )
+            prop = wf.create_proposal(
+                telegram_user_id=uid,
+                session_id=effective_session,
+                action=action,
+                arguments=proposal_args,
+                source_modality=modality,
+                now=_now(),
+            )
+        except (MediaPolicyError, WorkflowError) as exc:
+            return json.dumps(
+                {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "ok": True,
+                "proposal_id": prop.proposal_id,
+                "idempotency_key": prop.idempotency_key,
+                "preview": prop.preview_text,
+                "expires_at": prop.expires_at,
+            },
+            ensure_ascii=False,
+        )
+
+    def _image_search_handler(
+        args: dict[str, Any],
+        task_id: str = "",
+        session_id: str = "",
+        conversation_id: str = "",
+        **kwargs: Any,
+    ) -> str:
+        del kwargs
+        uid = registry.resolve(task_id, session_id, conversation_id)
+        if uid is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "SESSION_NOT_VERIFIED",
+                        "message": "No existe identidad Telegram verificada para esta sesión (fail-closed).",
+                    },
+                },
+                ensure_ascii=False,
+            )
+        try:
+            candidates = commons.search_and_stage(
+                brand=str(args.get("brand") or ""),
+                model_name=str(args.get("model_name") or ""),
+                model_code=str(args.get("model_code") or ""),
+                telegram_user_id=uid,
+                dm_session_id=_stable_dm_session(uid),
+                limit=int(args.get("limit") or 5),
+                now=_now(),
+            )
+        except MediaPolicyError as exc:
+            return json.dumps(
+                {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                ensure_ascii=False,
+            )
+        if not candidates:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "candidates": [],
+                    "message": "No se encontraron imágenes con coincidencia exacta de marca/modelo/código y licencia comercial verificada en Wikimedia Commons.",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps({"ok": True, "candidates": candidates}, ensure_ascii=False)
+
+    handlers: dict[str, Any] = {name: _make_read_handler(name) for name in READ_ONLY_TOOLS}
+    handlers[IMAGE_SEARCH_TOOL_NAME] = _image_search_handler
+    handlers[PROPOSAL_TOOL_NAME] = _propose_handler
+    return on_post_gateway_admission, on_pre_llm_call, on_pre_tool_call, on_session_end, handlers
 
 
 def register(ctx: Any) -> None:
-    """Register hooks and all 9 inventory MCP bridge tools with Hermes Agent v0.23.4."""
-    on_pre_llm_call, on_pre_tool_call, on_session_end, handlers = build_hooks_and_handlers()
+    """Register hooks and read/proposal tools with Hermes Agent v0.23.4."""
+    on_post_gateway_admission, on_pre_llm_call, on_pre_tool_call, on_session_end, handlers = (
+        build_hooks_and_handlers()
+    )
 
+    ctx.register_hook("post_gateway_admission", on_post_gateway_admission)
     ctx.register_hook("pre_llm_call", on_pre_llm_call)
     ctx.register_hook("pre_tool_call", on_pre_tool_call)
     ctx.register_hook("on_session_end", on_session_end)

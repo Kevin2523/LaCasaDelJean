@@ -1,21 +1,20 @@
 name: lacasadeljean-mcp-bridge
-version: "0.2.0"
+version: "0.3.0"
 description: >-
-  Trusted fail-closed Hermes v0.23.4 plugin that binds verified Telegram sender_id
-  to session_id via pre_llm_call, blocks disallowed/spoofed calls via pre_tool_call,
-  and exposes the 9 inventory MCP tools through a per-call signed X-Actor-Assertion
-  bridge with scoped human-confirmed approval_proof enforcement.
+  Trusted fail-closed Hermes v0.23.4 plugin for La Casa del Jean V2.
+  Exposes only read-only inventory tools and the non-mutating proposal tool
+  (`propose_inventory_write`) to the LLM. Intercepts explicit human
+  `CONFIRMAR <id>` / `CANCELAR <id>` replies via `post_gateway_admission`
+  outside the model, mints one-use signed `approval_proof` tokens, and
+  executes writes exclusively through the private MCP bridge.
 provides_tools:
   - search_products
   - get_product_detail
   - get_variant_stock
-  - create_product_draft
-  - create_variant
-  - attach_product_photo
-  - set_product_price
-  - record_stock_movement
-  - set_product_publication_status
+  - search_licensed_product_images
+  - propose_inventory_write
 provides_hooks:
+  - post_gateway_admission
   - pre_llm_call
   - pre_tool_call
   - on_session_end
