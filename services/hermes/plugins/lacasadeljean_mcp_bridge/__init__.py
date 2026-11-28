@@ -323,7 +323,11 @@ def build_hooks_and_handlers(
         except Exception:
             return {
                 "action": "handled",
-                "reply": "⛔ [INTERNAL_CONFIRMATION_ERROR] Error interno al procesar la confirmación/cancelación. No se realizó ningún cambio.",
+                "reply": (
+                    "⛔ [INTERNAL_CONFIRMATION_ERROR] Error interno con resultado incierto al procesar "
+                    "la confirmación/cancelación. Verifica y concilia el estado del inventario antes de "
+                    "reintentar para evitar duplicados."
+                ),
             }
 
     def on_pre_llm_call(

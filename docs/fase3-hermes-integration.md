@@ -61,7 +61,7 @@ La configuración nativa `mcp_servers` de Hermes únicamente admite cabeceras HT
 
 - **Fotos (`vision.enabled: true`):** Hermes analiza imágenes enviadas por Telegram con visión nativa para proponer descripción, color, talla y `alt_text` antes de llamar a `attach_product_photo` (previa confirmación).
 - **Notas de voz (`voice_mode.stt`):** Usa el proveedor STT integrado de Hermes **sin levantar un servicio Whisper separado**:
-  - **Por defecto (recomendado en 8 GB RAM):** Proveedor hospedado (`HERMES_STT_PROVIDER=openai`, `HERMES_STT_MODEL=whisper-1`, o `groq` con `GROQ_API_KEY`).
+  - **Por defecto (recomendado en 8 GB RAM):** Proveedor hospedado (`HERMES_STT_PROVIDER=openai`, `HERMES_STT_MODEL=whisper-1` usando `VOICE_TOOLS_OPENAI_KEY`, o `groq` con `GROQ_API_KEY`).
   - **Opcional local:** `faster-whisper` (`tiny` o `base` en CPU) **solo** si el operador lo elige explícitamente y el monitoreo de RAM/CPU del Ryzen 3 lo permite.
 
 ---
