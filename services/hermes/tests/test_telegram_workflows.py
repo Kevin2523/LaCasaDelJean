@@ -25,6 +25,7 @@ from PIL import Image
 from starlette.testclient import TestClient
 
 from services.hermes.plugins.lacasadeljean_mcp_bridge import (
+    IMAGE_SEARCH_TOOL_NAME,
     PROPOSAL_TOOL_NAME,
     TOOL_SCHEMAS,
     build_hooks_and_handlers,
@@ -33,6 +34,10 @@ from services.hermes.plugins.lacasadeljean_mcp_bridge.bridge import (
     BridgeConfig,
     SessionActorRegistry,
     TrustedApprovalStore,
+)
+from services.hermes.plugins.lacasadeljean_mcp_bridge.commons_search import (
+    CommonsImageSearchProvider,
+    validate_allowed_download_url,
 )
 from services.hermes.plugins.lacasadeljean_mcp_bridge.media import MediaPolicyError, StagedPhotoRegistry
 from services.hermes.plugins.lacasadeljean_mcp_bridge.security import WRITE_TOOLS
@@ -604,26 +609,181 @@ def test_photo_choices_through_proposal_tool_and_gateway_confirm(tmp_path: Path)
         assert expired_att["ok"] is False
         assert expired_att["error"]["code"] == "ATTACHMENT_EXPIRED"
 
-        # 6) exact_model_web_search fails closed even if LLM tries to supply self-declared external_image_candidate
-        no_provider = json.loads(
+        # 6) exact_model_web_search without external_candidate_id fails closed (never accepts LLM dict)
+        no_cand = json.loads(
             handlers[PROPOSAL_TOOL_NAME](
                 {
                     "action": "attach_product_photo",
                     "arguments": {"product_id": "prod-1"},
                     "source_modality": "photo",
                     "photo_choice": "exact_model_web_search",
-                    "external_image_candidate": {
-                        "brand": "Nike",
-                        "model_name": "Air Force 1 '07",
-                        "license_type": "brand_press_kit",
-                        "image_base64": sample_b64,
-                    },
                 },
                 task_id=admin_uuid,
             )
         )
-        assert no_provider["ok"] is False
-        assert no_provider["error"]["code"] == "EXTERNAL_SEARCH_PROVIDER_REQUIRED"
+        assert no_cand["ok"] is False
+        assert no_cand["error"]["code"] == "EXTERNAL_CANDIDATE_ID_REQUIRED"
+
+
+# ---------------------------------------------------------------------------
+# 3b. Wikimedia Commons server-side licensed image search (MockTransport, offline)
+# ---------------------------------------------------------------------------
+
+
+def test_commons_licensed_search_ssrf_expiry_cross_user_and_e2e_confirm() -> None:
+    backend = SimulatedFastAPIBackend()
+    mcp_app = _make_mcp_app(backend)
+    sample_bytes = base64.b64decode(_make_sample_jpeg_b64())
+    now_box = [time.time()]
+
+    def mock_commons(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "commons.wikimedia.org":
+            return httpx.Response(
+                200,
+                json={
+                    "query": {
+                        "pages": {
+                            "1": {
+                                "title": "File:Nike Air Force 1 CW2288-111 White.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/af1.jpg",
+                                        "descriptionurl": "https://commons.wikimedia.org/wiki/File:Nike_Air_Force_1_CW2288-111_White.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": len(sample_bytes),
+                                        "extmetadata": {
+                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                            "Artist": {"value": "Wikimedia Photographer"},
+                                            "ImageDescription": {"value": "Nike Air Force 1 CW2288-111 sneaker"},
+                                        },
+                                    }
+                                ],
+                            },
+                            "2": {
+                                "title": "File:Nike Air Force 1 CW2288-111 NC.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/wikipedia/commons/af1_nc.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": len(sample_bytes),
+                                        "extmetadata": {
+                                            "LicenseShortName": {"value": "CC BY-NC 4.0"},
+                                            "Artist": {"value": "NC Author"},
+                                        },
+                                    }
+                                ],
+                            },
+                            "3": {
+                                "title": "File:Nike Air Force 1 CW2288-111 EvilHost.jpg",
+                                "imageinfo": [
+                                    {
+                                        "url": "https://evil.example/af1.jpg",
+                                        "mime": "image/jpeg",
+                                        "size": len(sample_bytes),
+                                        "extmetadata": {"LicenseShortName": {"value": "CC0"}},
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                },
+            )
+        if request.url.host == "upload.wikimedia.org":
+            return httpx.Response(200, content=sample_bytes, headers={"content-type": "image/jpeg"})
+        return httpx.Response(404)
+
+    # Direct SSRF guard check
+    with pytest.raises(MediaPolicyError) as exc_ssrf:
+        validate_allowed_download_url("http://169.254.169.254/latest/meta-data/")
+    assert exc_ssrf.value.code == "SSRF_BLOCKED"
+
+    commons = CommonsImageSearchProvider(
+        transport=httpx.MockTransport(mock_commons),
+        default_ttl_seconds=60,
+    )
+    with TestClient(mcp_app) as tc:
+        registry = SessionActorRegistry()
+        post_adm, pre_llm, _, _, handlers = build_hooks_and_handlers(
+            config=_make_bridge_config(),
+            session_registry=registry,
+            approval_store=TrustedApprovalStore(),
+            commons_provider=commons,
+            transport=SyncASGITransport(tc),
+            clock=lambda: now_box[0],
+        )
+        admin_uuid = "550e8400-e29b-41d4-a716-446655440020"
+        op_uuid = "550e8400-e29b-41d4-a716-446655440021"
+        assert pre_llm(session_id=admin_uuid, platform="telegram", sender_id=ADMIN_TG_ID) is None
+        assert pre_llm(session_id=op_uuid, platform="telegram", sender_id=OPERATOR_TG_ID) is None
+
+        # Search returns ONLY the 1 verified CC BY-SA candidate (NC & evil host filtered out)
+        search_res = json.loads(
+            handlers[IMAGE_SEARCH_TOOL_NAME](
+                {"brand": "Nike", "model_name": "Air Force 1", "model_code": "CW2288-111"},
+                task_id=admin_uuid,
+            )
+        )
+        assert search_res["ok"] is True
+        assert len(search_res["candidates"]) == 1
+        cand_id = search_res["candidates"][0]["candidate_id"]
+        assert cand_id.startswith("ext_")
+        assert search_res["candidates"][0]["license_type"] == "cc_by_sa"
+
+        # Cross-user attempt to use Admin's candidate_id fails closed
+        cross_cand = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1"},
+                    "source_modality": "photo",
+                    "photo_choice": "exact_model_web_search",
+                    "external_candidate_id": cand_id,
+                },
+                task_id=op_uuid,
+            )
+        )
+        assert cross_cand["ok"] is False
+        assert cross_cand["error"]["code"] == "UNAUTHORIZED_CANDIDATE"
+
+        # Owner proposes & confirms via post_gateway_admission -> downloaded & uploaded via MCP
+        prop = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1", "is_primary": True},
+                    "source_modality": "photo",
+                    "photo_choice": "exact_model_web_search",
+                    "external_candidate_id": cand_id,
+                },
+                task_id=admin_uuid,
+            )
+        )
+        assert prop["ok"] is True
+        confirm_resp = post_adm(
+            session_key=f"agent:main:telegram:dm:{ADMIN_TG_ID}",
+            platform="telegram",
+            source={"user_id": ADMIN_TG_ID, "chat_id": ADMIN_TG_ID, "chat_type": "dm"},
+            text=f"CONFIRMAR {prop['proposal_id']}",
+        )
+        assert "✅" in confirm_resp["reply"]
+        assert len(backend.products["prod-1"]["photos"]) == 1
+
+        # Expired candidate fails closed
+        now_box[0] += 65
+        exp_cand = json.loads(
+            handlers[PROPOSAL_TOOL_NAME](
+                {
+                    "action": "attach_product_photo",
+                    "arguments": {"product_id": "prod-1"},
+                    "source_modality": "photo",
+                    "photo_choice": "exact_model_web_search",
+                    "external_candidate_id": cand_id,
+                },
+                task_id=admin_uuid,
+            )
+        )
+        assert exp_cand["ok"] is False
+        assert exp_cand["error"]["code"] == "CANDIDATE_EXPIRED"
 
 
 # ---------------------------------------------------------------------------

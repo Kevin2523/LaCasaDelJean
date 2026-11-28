@@ -35,6 +35,7 @@ from .bridge import (
     normalize_tool_name,
     parse_verified_telegram_sender,
 )
+from .commons_search import CommonsImageSearchProvider
 from .media import (
     MediaPolicyError,
     StagedPhotoRegistry,
@@ -49,9 +50,11 @@ from .workflows import ProposalWorkflowManager, WorkflowError
 SESSION_ACTORS = SessionActorRegistry()
 APPROVAL_STORE = TrustedApprovalStore()
 STAGED_PHOTOS = StagedPhotoRegistry()
+COMMONS_SEARCH = CommonsImageSearchProvider()
 
 PROPOSAL_TOOL_NAME = "propose_inventory_write"
-MODEL_EXPOSED_TOOLS: frozenset[str] = READ_ONLY_TOOLS | frozenset({PROPOSAL_TOOL_NAME})
+IMAGE_SEARCH_TOOL_NAME = "search_licensed_product_images"
+MODEL_EXPOSED_TOOLS: frozenset[str] = READ_ONLY_TOOLS | frozenset({PROPOSAL_TOOL_NAME, IMAGE_SEARCH_TOOL_NAME})
 
 _CONFIRM_CANCEL_RE = re.compile(
     r"^\s*(CONFIRMAR|CONFIRM|CANCELAR|CANCEL)\s+(prop_[a-fA-F0-9]+)\s*$",
@@ -91,6 +94,23 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "required": ["variant_id"],
         },
     },
+    IMAGE_SEARCH_TOOL_NAME: {
+        "name": IMAGE_SEARCH_TOOL_NAME,
+        "description": (
+            "Buscar imágenes con licencia comercial verificada en Wikimedia Commons para un "
+            "modelo exacto (marca + modelo + código). Solo lectura; devuelve candidate_id opacos."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string"},
+                "model_name": {"type": "string"},
+                "model_code": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
+            },
+            "required": ["brand", "model_name", "model_code"],
+        },
+    },
     PROPOSAL_TOOL_NAME: {
         "name": PROPOSAL_TOOL_NAME,
         "description": (
@@ -118,6 +138,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "ID opaco (att_...) o 'latest' del adjunto staged por el gateway (nunca pasar rutas ni image_base64).",
                 },
+                "external_candidate_id": {
+                    "type": "string",
+                    "description": "ID opaco (ext_...) devuelto por search_licensed_product_images para exact_model_web_search.",
+                },
                 "expected_brand": {"type": "string"},
                 "expected_model": {"type": "string"},
                 "expected_model_code": {"type": "string"},
@@ -136,30 +160,36 @@ def _apply_photo_choice(
     proposal_args: dict[str, Any],
     *,
     staged_registry: StagedPhotoRegistry,
+    commons_provider: CommonsImageSearchProvider,
     telegram_user_id: int,
     dm_session_id: str,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Process operator photo choice via media.py using ONLY trusted staged attachments (never LLM base64/path)."""
+    """Process operator photo choice via media.py using ONLY trusted staged attachments or server-side Commons IDs."""
     untrusted = [k for k in proposal_args if k in _UNTRUSTED_IMAGE_KEYS]
     if untrusted:
         raise MediaPolicyError(
             "UNTRUSTED_IMAGE_INPUT",
             f"El modelo no puede suministrar {', '.join(sorted(untrusted))}. "
-            "Usa staged_attachment_id de una foto adjunta en Telegram o exact_model_web_search.",
+            "Usa staged_attachment_id o external_candidate_id.",
         )
 
     choice = args.get("photo_choice") or "original"
     updated = dict(proposal_args)
 
     if choice == "exact_model_web_search":
-        # Never trust LLM-supplied external_image_candidate/license_type/image_base64.
-        # Fail closed until a trusted server-side licensed image search provider is configured.
-        raise MediaPolicyError(
-            "EXTERNAL_SEARCH_PROVIDER_REQUIRED",
-            "No hay proveedor autorizado de búsqueda de imágenes configurado en el servidor; "
-            "el modelo no puede suministrar candidatos externos auto-declarados. "
-            "Usa 'original' o 'pillow_optimize' con una foto adjunta en Telegram.",
+        cand_id = str(args.get("external_candidate_id") or "").strip()
+        if not cand_id:
+            raise MediaPolicyError(
+                "EXTERNAL_CANDIDATE_ID_REQUIRED",
+                "Se requiere external_candidate_id devuelto por search_licensed_product_images "
+                "(nunca candidatos auto-declarados por el modelo).",
+            )
+        prepared = commons_provider.fetch_and_prepare_candidate(
+            candidate_id=cand_id,
+            telegram_user_id=telegram_user_id,
+            dm_session_id=dm_session_id,
+            now=now,
         )
     elif choice in ("original", "pillow_optimize"):
         att_id = str(args.get("staged_attachment_id") or "").strip()
@@ -224,6 +254,7 @@ def build_hooks_and_handlers(
     approval_store: TrustedApprovalStore | None = None,
     workflow_manager: ProposalWorkflowManager | None = None,
     staged_photos: StagedPhotoRegistry | None = None,
+    commons_provider: CommonsImageSearchProvider | None = None,
     transport: Any = None,
     clock: Any = None,
 ) -> tuple[Any, Any, Any, Any, dict[str, Any]]:
@@ -231,6 +262,7 @@ def build_hooks_and_handlers(
     registry = session_registry if session_registry is not None else SESSION_ACTORS
     approvals = approval_store if approval_store is not None else APPROVAL_STORE
     staged_registry = staged_photos if staged_photos is not None else STAGED_PHOTOS
+    commons = commons_provider if commons_provider is not None else COMMONS_SEARCH
 
     def _cfg() -> BridgeConfig:
         return config if config is not None else BridgeConfig.from_env()
@@ -480,6 +512,7 @@ def build_hooks_and_handlers(
                     args,
                     proposal_args,
                     staged_registry=staged_registry,
+                    commons_provider=commons,
                     telegram_user_id=uid,
                     dm_session_id=effective_session,
                     now=_now(),
@@ -509,7 +542,54 @@ def build_hooks_and_handlers(
             ensure_ascii=False,
         )
 
+    def _image_search_handler(
+        args: dict[str, Any],
+        task_id: str = "",
+        session_id: str = "",
+        conversation_id: str = "",
+        **kwargs: Any,
+    ) -> str:
+        del kwargs
+        uid = registry.resolve(task_id, session_id, conversation_id)
+        if uid is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "SESSION_NOT_VERIFIED",
+                        "message": "No existe identidad Telegram verificada para esta sesión (fail-closed).",
+                    },
+                },
+                ensure_ascii=False,
+            )
+        try:
+            candidates = commons.search_and_stage(
+                brand=str(args.get("brand") or ""),
+                model_name=str(args.get("model_name") or ""),
+                model_code=str(args.get("model_code") or ""),
+                telegram_user_id=uid,
+                dm_session_id=_stable_dm_session(uid),
+                limit=int(args.get("limit") or 5),
+                now=_now(),
+            )
+        except MediaPolicyError as exc:
+            return json.dumps(
+                {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                ensure_ascii=False,
+            )
+        if not candidates:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "candidates": [],
+                    "message": "No se encontraron imágenes con coincidencia exacta de marca/modelo/código y licencia comercial verificada en Wikimedia Commons.",
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps({"ok": True, "candidates": candidates}, ensure_ascii=False)
+
     handlers: dict[str, Any] = {name: _make_read_handler(name) for name in READ_ONLY_TOOLS}
+    handlers[IMAGE_SEARCH_TOOL_NAME] = _image_search_handler
     handlers[PROPOSAL_TOOL_NAME] = _propose_handler
     return on_post_gateway_admission, on_pre_llm_call, on_pre_tool_call, on_session_end, handlers
 
